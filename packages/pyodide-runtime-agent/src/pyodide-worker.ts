@@ -1,0 +1,469 @@
+// Enhanced Pyodide Web Worker
+//
+// This worker runs Pyodide with IPython display formatting loaded from
+// a separate Python file, but executes user code directly through Pyodide
+// to avoid IPython's code transformations. It handles serialization properly
+// and provides rich output support with interrupt capabilities.
+
+/// <reference lib="webworker" />
+
+import { loadPyodide, type PyodideInterface } from "npm:pyodide";
+import { getCacheConfig, getEssentialPackages } from "./cache-utils.ts";
+
+declare const self: DedicatedWorkerGlobalScope;
+
+let pyodide: PyodideInterface | null = null;
+let interruptBuffer: SharedArrayBuffer | null = null;
+
+// Handle messages from main thread
+self.addEventListener("message", async (event) => {
+  const { id, type, data } = (event as MessageEvent).data;
+
+  try {
+    switch (type) {
+      case "init": {
+        await initializePyodide(
+          data.interruptBuffer,
+          data.packages,
+        );
+        self.postMessage({ id, type: "response", data: { success: true } });
+        break;
+      }
+
+      case "execute": {
+        const result = await executePython(data.code);
+        self.postMessage({ id, type: "response", data: result });
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown message type: ${type}`);
+    }
+  } catch (error) {
+    self.postMessage({
+      id,
+      type: "response",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * Initialize Pyodide with advanced IPython integration
+ */
+async function initializePyodide(
+  buffer: SharedArrayBuffer,
+  packagesToLoad?: string[],
+): Promise<void> {
+  self.postMessage({
+    type: "log",
+    data: "Loading Pyodide with enhanced display support",
+  });
+
+  // Store interrupt buffer
+  interruptBuffer = buffer;
+
+  // Get cache configuration and packages to load
+  const { packageCacheDir } = getCacheConfig();
+  const packagesForInit = packagesToLoad || getEssentialPackages();
+
+  self.postMessage({
+    type: "log",
+    data: `Using cache directory: ${packageCacheDir}`,
+  });
+
+  // Load Pyodide with packages in parallel for faster initialization
+  pyodide = await loadPyodide({
+    packageCacheDir,
+    packages: packagesForInit, // Load packages in parallel with Pyodide initialization
+    stdout: (text: string) => {
+      self.postMessage({
+        type: "stream_output",
+        data: { type: "stdout", text },
+      });
+    },
+    stderr: (text: string) => {
+      self.postMessage({
+        type: "stream_output",
+        data: { type: "stderr", text },
+      });
+    },
+  });
+
+  // Set up interrupt buffer
+  if (interruptBuffer) {
+    const interruptView = new Int32Array(interruptBuffer);
+    pyodide.setInterruptBuffer(interruptView);
+    self.postMessage({ type: "log", data: "Interrupt buffer configured" });
+  }
+
+  // Packages are already loaded in parallel during Pyodide initialization
+  self.postMessage({
+    type: "log",
+    data: `Packages loaded in parallel: ${packagesForInit.join(", ")}`,
+  });
+
+  // Load our Python bootstrap file
+  await setupIPythonEnvironment();
+
+  self.postMessage({
+    type: "log",
+    data: "Enhanced Pyodide initialized successfully",
+  });
+}
+
+/**
+ * Set up IPython environment by loading the bootstrap Python file
+ */
+async function setupIPythonEnvironment(): Promise<void> {
+  self.postMessage({
+    type: "log",
+    data: "Loading IPython environment from bootstrap file",
+  });
+
+  // Get the Python bootstrap code
+  const pythonBootstrap = await fetch(
+    new URL("./ipython-setup.py", import.meta.url),
+  ).then((response) => response.text());
+
+  // Execute the bootstrap code
+  await pyodide!.runPythonAsync(pythonBootstrap);
+
+  self.postMessage({
+    type: "log",
+    data: "IPython environment loaded successfully",
+  });
+}
+
+/**
+ * Execute Python code with rich output capture and proper serialization
+ */
+async function executePython(code: string): Promise<{
+  result: unknown;
+  outputs: Array<{
+    type: "display" | "result" | "error" | "stream";
+    data: unknown;
+  }>;
+}> {
+  if (!pyodide) {
+    throw new Error("Pyodide not initialized");
+  }
+
+  const outputs: Array<{
+    type: "display" | "result" | "error" | "stream";
+    data: unknown;
+  }> = [];
+
+  let result = null;
+  let executionError = null;
+
+  try {
+    // Set up JavaScript callbacks with proper serialization
+    pyodide.globals.set(
+      "js_display_callback",
+      (
+        data: unknown,
+        metadata: unknown,
+        _transient: unknown,
+        update = false,
+      ) => {
+        try {
+          // Ensure data is serializable
+          const serializedData = ensureSerializable(data);
+          const serializedMetadata = ensureSerializable(metadata);
+
+          const outputType = update ? "update_display_data" : "display_data";
+
+          self.postMessage({
+            type: "stream_output",
+            data: {
+              type: outputType,
+              data: serializedData,
+              metadata: serializedMetadata,
+            },
+          });
+
+          outputs.push({
+            type: "display",
+            data: {
+              data: serializedData,
+              metadata: serializedMetadata,
+              update,
+            },
+          });
+        } catch (error) {
+          self.postMessage({
+            type: "log",
+            data: `Error in display callback: ${error}`,
+          });
+          self.postMessage({
+            type: "stream_output",
+            data: {
+              type: "error",
+              data: {
+                ename: "SerializationError",
+                evalue: `Error serializing display data: ${error}`,
+                traceback: [String(error)],
+              },
+            },
+          });
+        }
+      },
+    );
+
+    pyodide.globals.set(
+      "js_execution_callback",
+      (execution_count: number, data: unknown, metadata: unknown) => {
+        try {
+          // Ensure data is serializable
+          const serializedData = ensureSerializable(data);
+          const serializedMetadata = ensureSerializable(metadata);
+
+          self.postMessage({
+            type: "stream_output",
+            data: {
+              type: "execute_result",
+              data: serializedData,
+              metadata: serializedMetadata,
+              execution_count,
+            },
+          });
+
+          outputs.push({
+            type: "result",
+            data: {
+              data: serializedData,
+              metadata: serializedMetadata,
+              execution_count,
+            },
+          });
+        } catch (error) {
+          self.postMessage({
+            type: "log",
+            data: `Error in execution callback: ${error}`,
+          });
+          self.postMessage({
+            type: "stream_output",
+            data: {
+              type: "error",
+              data: {
+                ename: "SerializationError",
+                evalue: `Error serializing execution result: ${error}`,
+                traceback: [String(error)],
+              },
+            },
+          });
+        }
+      },
+    );
+
+    // Wire up the callbacks to the shell
+    await pyodide.runPythonAsync(`
+# Connect our JavaScript callbacks to the IPython shell
+shell.display_pub.js_callback = js_display_callback
+shell.displayhook.js_callback = js_execution_callback
+`);
+
+    // Execute the code directly with Pyodide (no IPython transformations)
+    try {
+      // Execute the user code directly
+      const rawResult = await pyodide.runPythonAsync(code);
+
+      // If there's a result, format it through IPython's display system
+      if (rawResult !== null && rawResult !== undefined) {
+        // Store the result in Python globals and format it
+        pyodide.globals.set("_pyodide_result", rawResult);
+        await pyodide.runPythonAsync(`
+# Format the result through IPython's displayhook for rich formatting
+if '_pyodide_result' in globals():
+    shell.displayhook(_pyodide_result)
+    del _pyodide_result
+`);
+        // Don't return the result since displayhook already handled it
+        result = null;
+      } else {
+        result = rawResult;
+      }
+    } catch (pythonError: unknown) {
+      executionError = formatPythonError(pythonError);
+    }
+  } catch (err: unknown) {
+    executionError = {
+      ename: "KernelError",
+      evalue: err instanceof Error ? err.message : "Kernel execution failed",
+      traceback: [
+        err instanceof Error ? (err.stack || err.message) : String(err),
+      ],
+    };
+  }
+
+  // Send error if one occurred
+  if (executionError) {
+    self.postMessage({
+      type: "stream_output",
+      data: { type: "error", data: executionError },
+    });
+
+    outputs.push({ type: "error", data: executionError });
+  }
+
+  return {
+    result: ensureSerializable(result),
+    outputs,
+  };
+}
+
+/**
+ * Ensure data is serializable for postMessage
+ */
+function ensureSerializable(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  // Handle primitive types
+  if (
+    typeof obj === "string" || typeof obj === "number" ||
+    typeof obj === "boolean"
+  ) {
+    return obj;
+  }
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(ensureSerializable);
+  }
+
+  // Handle objects
+  if (typeof obj === "object") {
+    // Handle PyProxy objects from Pyodide
+    if (obj && typeof obj === "object" && "toJs" in obj) {
+      try {
+        const jsObj = (obj as { toJs: () => unknown }).toJs();
+        return ensureSerializable(jsObj);
+      } catch {
+        return String(obj);
+      }
+    }
+
+    // Handle Map objects
+    if (obj instanceof Map) {
+      const result: Record<string, unknown> = {};
+      for (const [key, value] of obj) {
+        result[String(key)] = ensureSerializable(value);
+      }
+      return result;
+    }
+
+    // Handle Set objects
+    if (obj instanceof Set) {
+      return Array.from(obj).map(ensureSerializable);
+    }
+
+    // Handle regular objects
+    try {
+      const result: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        result[key] = ensureSerializable(value);
+      }
+      return result;
+    } catch {
+      return String(obj);
+    }
+  }
+
+  // Fallback to string representation
+  return String(obj);
+}
+
+/**
+ * Format Python errors with enhanced information
+ */
+function formatPythonError(error: unknown): {
+  ename: string;
+  evalue: string;
+  traceback: string[];
+} {
+  if (!error) {
+    return {
+      ename: "UnknownError",
+      evalue: "Unknown Python error occurred",
+      traceback: ["Unknown Python error occurred"],
+    };
+  }
+
+  if (error && typeof error === "object") {
+    // Handle Pyodide PyProxy errors
+    if ("toString" in error && typeof error.toString === "function") {
+      try {
+        const errorStr = error.toString();
+
+        // Parse Python traceback format
+        if (errorStr.includes("Traceback")) {
+          const lines = errorStr.split("\n").filter((line) => line.trim());
+          const lastLine = lines[lines.length - 1] || "";
+          const match = lastLine.match(/^(\w+(?:Error)?): (.*)$/);
+
+          if (match && match[1] && match[2]) {
+            return {
+              ename: match[1],
+              evalue: match[2],
+              traceback: lines,
+            };
+          }
+        }
+
+        // Handle simple error format
+        if (errorStr.includes("Error:")) {
+          const match = errorStr.match(/^(\w+(?:Error)?): (.*)$/);
+          if (match && match[1] && match[2]) {
+            return {
+              ename: match[1],
+              evalue: match[2],
+              traceback: [errorStr],
+            };
+          }
+        }
+
+        return {
+          ename: "PythonError",
+          evalue: errorStr,
+          traceback: [errorStr],
+        };
+      } catch {
+        // Fallback if toString fails
+      }
+    }
+
+    // Handle structured error objects
+    if ("type" in error && "message" in error) {
+      return {
+        ename: String(error.type),
+        evalue: String(error.message),
+        traceback: [String(error.message)],
+      };
+    }
+
+    if ("message" in error) {
+      return {
+        ename: "PythonError",
+        evalue: String(error.message),
+        traceback: [String(error.message)],
+      };
+    }
+  }
+
+  // Ultimate fallback
+  const errorStr = String(error);
+  return {
+    ename: "PythonError",
+    evalue: errorStr,
+    traceback: [errorStr],
+  };
+}
+
+// Log that enhanced worker is ready
+self.postMessage({
+  type: "log",
+  data: "Enhanced Pyodide worker ready with serialization-safe output",
+});

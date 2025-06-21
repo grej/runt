@@ -1,0 +1,49 @@
+{
+  "name": "@runt/pyodide-runtime-agent",
+  "version": "0.1.0",
+  "description": "Python runtime agent using Pyodide with IPython integration",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/runtimed/anode.git"
+  },
+  "exports": {
+    ".": "./src/mod.ts"
+  },
+  "imports": {
+    "@runt/lib": "../lib/mod.ts",
+    "@runt/schema": "../schema/mod.ts",
+    "npm:pyodide": "npm:pyodide@^0.27.7",
+    "@std/async": "jsr:@std/async@^1.0.0"
+  },
+  "tasks": {
+    "dev": "deno run --allow-all --env-file=.env src/pyodide-agent.ts",
+    "test": "deno test --allow-all --env-file=.env",
+    "check": "deno check src/**/*.ts",
+    "fmt": "deno fmt",
+    "lint": "deno lint"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 80,
+    "indentWidth": 2,
+    "semiColons": true,
+    "singleQuote": false,
+    "proseWrap": "preserve"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "publish": {
+    "include": ["src/", "README.md"],
+    "exclude": ["**/*.test.ts", "**/test_*.ts"]
+  }
+}

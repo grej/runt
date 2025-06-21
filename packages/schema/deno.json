@@ -1,0 +1,28 @@
+{
+  "name": "@runt/schema",
+  "version": "0.1.0",
+  "description": "Anode schema for runtime agents and clients",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/runtimed/anode.git"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "publish": {
+    "include": ["mod.ts", "README.md"]
+  },
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["ESNext", "DOM"]
+  },
+  "imports": {
+    "@livestore/livestore": "npm:@livestore/livestore@^0.3.1"
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["no-slow-types"]
+    }
+  }
+}

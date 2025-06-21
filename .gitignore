@@ -1,0 +1,14 @@
+.env
+runt
+echo-agent
+
+# Pyodide package cache
+.runt/
+
+# Coverage reports
+cov/
+cov.lcov
+*.lcov
+
+# Sometimes created by the python files here
+.ropeproject
