@@ -7,6 +7,16 @@
 import { createRuntimeConfig, RuntimeAgent } from "@runt/lib";
 import type { ExecutionContext } from "@runt/lib";
 import { createLogger } from "@runt/lib";
+import {
+  ensureTextPlainFallback,
+  isJsonMimeType,
+  isTextBasedMimeType,
+  KNOWN_MIME_TYPES,
+  type KnownMimeType,
+  type MediaBundle,
+  toAIMediaBundle,
+  validateMediaBundle,
+} from "@runt/lib";
 import { getEssentialPackages } from "./cache-utils.ts";
 import type { Store } from "npm:@livestore/livestore";
 import {
@@ -385,30 +395,69 @@ export class PyodideRuntimeAgent {
   /**
    * Format rich output with proper MIME type handling
    */
+  // Type guard for objects with string indexing
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  // Type guard for rich data structure
+  private hasDataProperty(value: unknown): value is { data: unknown } {
+    return this.isRecord(value) && "data" in value;
+  }
+
   private formatRichOutput(
     result: unknown,
     metadata?: Record<string, unknown>,
-  ): Record<string, string> {
+  ): MediaBundle {
     if (result === null || result === undefined) {
       return { "text/plain": "" };
     }
 
     // If result is already a formatted output dict with MIME types
-    if (
-      typeof result === "object" &&
-      result !== null &&
-      ("text/plain" in result ||
-        "text/html" in result ||
-        "image/svg+xml" in result ||
-        "application/json" in result)
-    ) {
-      return result as Record<string, string>;
-    }
+    if (this.isRecord(result)) {
+      const rawBundle: MediaBundle = {};
+      let hasMimeType = false;
 
-    // Handle rich data types
-    if (typeof result === "object" && result !== null) {
+      // Check all known MIME types and any +json types
+      for (const mimeType of Object.keys(result)) {
+        if (
+          KNOWN_MIME_TYPES.includes(mimeType as KnownMimeType) ||
+          isJsonMimeType(mimeType)
+        ) {
+          const value = result[mimeType];
+
+          // Handle different value types appropriately
+          if (typeof value === "string") {
+            rawBundle[mimeType] = value;
+            hasMimeType = true;
+          } else if (typeof value === "number" || typeof value === "boolean") {
+            rawBundle[mimeType] = isTextBasedMimeType(mimeType)
+              ? String(value)
+              : value;
+            hasMimeType = true;
+          } else if (this.isRecord(value)) {
+            // Keep JSON objects as objects for JSON-based types
+            if (isJsonMimeType(mimeType)) {
+              rawBundle[mimeType] = value;
+            } else {
+              rawBundle[mimeType] = JSON.stringify(value);
+            }
+            hasMimeType = true;
+          } else if (value !== null && value !== undefined) {
+            rawBundle[mimeType] = String(value);
+            hasMimeType = true;
+          }
+        }
+      }
+
+      if (hasMimeType) {
+        // Validate and ensure text/plain fallback
+        const validated = validateMediaBundle(rawBundle);
+        return ensureTextPlainFallback(validated);
+      }
+
       // Check if it's a rich data structure with data and metadata
-      if ("data" in result && typeof result.data === "object") {
+      if (this.hasDataProperty(result)) {
         return this.formatRichOutput(result.data, metadata);
       }
 
@@ -417,7 +466,7 @@ export class PyodideRuntimeAgent {
         const jsonStr = JSON.stringify(result, null, 2);
         return {
           "text/plain": jsonStr,
-          "application/json": JSON.stringify(result),
+          "application/json": result,
         };
       } catch {
         return { "text/plain": String(result) };
@@ -642,38 +691,50 @@ export class PyodideRuntimeAgent {
             .orderBy("position", "asc"),
         ) as SchemaOutputData[];
 
-        // Filter outputs to only include text/plain and text/markdown for AI context
+        // Convert outputs to AI-friendly formats
         const filteredOutputs = outputs.map((output: SchemaOutputData) => {
           const outputData = output.data;
-          const filteredData: Record<string, unknown> = {};
 
           if (outputData && typeof outputData === "object") {
-            if (outputData["text/plain"]) {
-              filteredData["text/plain"] = outputData["text/plain"];
+            // For rich media outputs, convert to AI-friendly bundle
+            if (
+              outputData["text/plain"] || outputData["text/html"] ||
+              outputData["text/markdown"] || outputData["application/json"]
+            ) {
+              const aiBundle = toAIMediaBundle(outputData as MediaBundle);
+              return {
+                outputType: output.outputType,
+                data: aiBundle,
+              };
             }
-            if (outputData["text/markdown"]) {
-              filteredData["text/markdown"] = outputData["text/markdown"];
-            }
+
             // For stream outputs, include the text directly
             if (outputData.text && outputData.name) {
-              filteredData.text = outputData.text;
-              filteredData.name = outputData.name;
+              return {
+                outputType: output.outputType,
+                data: {
+                  text: outputData.text,
+                  name: outputData.name,
+                },
+              };
             }
+
             // For error outputs, include error info
             if (outputData.ename && outputData.evalue) {
-              filteredData.ename = outputData.ename;
-              filteredData.evalue = outputData.evalue;
-              if (outputData.traceback) {
-                filteredData.traceback = outputData.traceback;
-              }
+              return {
+                outputType: output.outputType,
+                data: {
+                  ename: outputData.ename,
+                  evalue: outputData.evalue,
+                  traceback: outputData.traceback || [],
+                },
+              };
             }
           }
 
           return {
             outputType: output.outputType,
-            data: Object.keys(filteredData).length > 0
-              ? filteredData
-              : (outputData as Record<string, unknown>),
+            data: outputData as Record<string, unknown>,
           };
         });
 

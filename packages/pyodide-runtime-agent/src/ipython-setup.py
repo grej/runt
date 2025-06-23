@@ -17,7 +17,7 @@ import os
 import sys
 import io
 import json
-import traceback
+
 from IPython.core.interactiveshell import InteractiveShell
 from IPython.core.displayhook import DisplayHook
 from IPython.core.displaypub import DisplayPublisher
@@ -44,10 +44,25 @@ os.environ.update(
 )
 
 
-# Mock terminal support for rich colors
-class ColorfulStream:
-    """Stream wrapper that reports as a TTY for color support"""
+# Enhanced terminal support for rich colors
+class ColorfulStdout:
+    def __init__(self, original):
+        self._original = original
 
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+    def isatty(self):
+        return True
+
+    def write(self, text):
+        return self._original.write(text)
+
+    def flush(self):
+        return self._original.flush()
+
+
+class ColorfulStderr:
     def __init__(self, original):
         self._original = original
 
@@ -65,8 +80,8 @@ class ColorfulStream:
 
 
 # Replace stdout and stderr with colorful versions
-sys.stdout = ColorfulStream(sys.stdout)
-sys.stderr = ColorfulStream(sys.stderr)
+sys.stdout = ColorfulStdout(sys.stdout)
+sys.stderr = ColorfulStderr(sys.stderr)
 
 
 class LiteHistoryManager(HistoryManager):
@@ -225,35 +240,30 @@ _original_show = plt.show
 
 
 def _capture_matplotlib_show(block=None):
-    """Capture matplotlib plots as high-quality SVG and send via display system"""
+    """Capture matplotlib plots as SVG and send via display system"""
     if plt.get_fignums():
         fig = plt.gcf()
         svg_buffer = io.StringIO()
 
         try:
-            # Save as SVG with high quality settings
             fig.savefig(
                 svg_buffer,
                 format="svg",
                 bbox_inches="tight",
                 facecolor="white",
                 edgecolor="none",
-                dpi=100,
-                transparent=False,
             )
             svg_content = svg_buffer.getvalue()
             svg_buffer.close()
 
-            # Use IPython's display system to show SVG
+            # Use IPython's display system
             from IPython.display import display, SVG
 
             display(SVG(svg_content))
 
-            # Clear the figure
             plt.clf()
-
         except Exception as e:
-            print(f"Error capturing matplotlib plot: {e}", file=sys.stderr)
+            print(f"Error capturing plot: {e}")
 
     return _original_show(block=block) if block is not None else _original_show()
 
@@ -268,23 +278,24 @@ def setup_rich_formatters():
     try:
         import pandas as pd
 
-        # Enhanced pandas display options
-        pd.set_option("display.max_rows", 100)
+        # Enhanced pandas display options for better notebook output
+        pd.set_option("display.max_rows", 50)
         pd.set_option("display.max_columns", 20)
         pd.set_option("display.width", None)
-        pd.set_option("display.max_colwidth", 50)
+        pd.set_option("display.max_colwidth", 100)
+        pd.set_option("display.precision", 4)
 
     except ImportError:
-        print("INFO: Pandas not available for rich formatting")
+        pass  # Pandas not available
 
     try:
         import numpy as np
 
         # Enhanced numpy display
-        np.set_printoptions(precision=4, suppress=True, linewidth=120)
+        np.set_printoptions(precision=4, suppress=True, linewidth=120, threshold=1000)
 
     except ImportError:
-        print("INFO: NumPy not available for rich formatting")
+        pass  # NumPy not available
 
 
 # Apply rich formatters
@@ -294,6 +305,8 @@ setup_rich_formatters()
 def format_exception(exc_type, exc_value, exc_traceback):
     """Format exceptions with standard Python traceback formatting"""
     try:
+        import traceback
+
         # Use standard traceback formatting to preserve exception type information
         return "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     except Exception as format_error:
@@ -309,6 +322,8 @@ def format_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = lambda exc_type, exc_value, exc_traceback: print(
     format_exception(exc_type, exc_value, exc_traceback), file=sys.stderr
 )
+
+print("IPython environment ready with rich display support")
 
 
 # Set up global callbacks (will be overridden by worker)

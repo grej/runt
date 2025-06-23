@@ -29,3 +29,6 @@ export type {
   RuntimeAgentOptions,
 } from "./src/types.ts";
 export type { LoggerConfig } from "./src/logging.ts";
+
+// Media types and utilities for rich content handling
+export * from "./src/media/mod.ts";
