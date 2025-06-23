@@ -394,22 +394,51 @@ export class PyodideRuntimeAgent {
     }
 
     // If result is already a formatted output dict with MIME types
-    if (
-      typeof result === "object" &&
-      result !== null &&
-      ("text/plain" in result ||
-        "text/html" in result ||
-        "image/svg+xml" in result ||
-        "application/json" in result)
-    ) {
-      return result as Record<string, string>;
-    }
-
-    // Handle rich data types
     if (typeof result === "object" && result !== null) {
+      const formatted: Record<string, string> = {};
+
+      // Handle common MIME types
+      const mimeTypes = [
+        "text/plain",
+        "text/html",
+        "text/markdown",
+        "application/json",
+        "image/png",
+        "image/jpeg",
+        "image/svg+xml",
+        "application/pdf",
+      ];
+
+      let hasMimeType = false;
+      for (const mimeType of mimeTypes) {
+        if (mimeType in result) {
+          formatted[mimeType] = String((result as any)[mimeType]);
+          hasMimeType = true;
+        }
+      }
+
+      if (hasMimeType) {
+        // Ensure we always have text/plain
+        if (!formatted["text/plain"] && Object.keys(formatted).length > 0) {
+          // Try to extract plain text from HTML or use first available content
+          if (formatted["text/html"]) {
+            formatted["text/plain"] = formatted["text/html"].replace(
+              /<[^>]*>/g,
+              "",
+            );
+          } else {
+            const firstKey = Object.keys(formatted)[0];
+            if (firstKey && formatted[firstKey]) {
+              formatted["text/plain"] = String(formatted[firstKey]);
+            }
+          }
+        }
+        return formatted;
+      }
+
       // Check if it's a rich data structure with data and metadata
-      if ("data" in result && typeof result.data === "object") {
-        return this.formatRichOutput(result.data, metadata);
+      if ("data" in result && typeof (result as any).data === "object") {
+        return this.formatRichOutput((result as any).data, metadata);
       }
 
       // Format as JSON with pretty printing

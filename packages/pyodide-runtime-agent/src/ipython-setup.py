@@ -44,10 +44,25 @@ os.environ.update(
 )
 
 
-# Mock terminal support for rich colors
-class ColorfulStream:
-    """Stream wrapper that reports as a TTY for color support"""
+# Enhanced terminal support for rich colors
+class ColorfulStdout:
+    def __init__(self, original):
+        self._original = original
 
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+    def isatty(self):
+        return True
+
+    def write(self, text):
+        return self._original.write(text)
+
+    def flush(self):
+        return self._original.flush()
+
+
+class ColorfulStderr:
     def __init__(self, original):
         self._original = original
 
@@ -65,8 +80,8 @@ class ColorfulStream:
 
 
 # Replace stdout and stderr with colorful versions
-sys.stdout = ColorfulStream(sys.stdout)
-sys.stderr = ColorfulStream(sys.stderr)
+sys.stdout = ColorfulStdout(sys.stdout)
+sys.stderr = ColorfulStderr(sys.stderr)
 
 
 class LiteHistoryManager(HistoryManager):
@@ -152,33 +167,24 @@ class RichDisplayHook(DisplayHook):
         self.execution_count = 0
 
     def __call__(self, result):
-        """Handle execution results with proper serialization"""
+        """Override call to capture execution results"""
         if result is not None:
+            # Increment execution count
             self.execution_count += 1
 
-            # Format the result using IPython's rich formatting
-            try:
-                format_dict, md_dict = self.compute_format_data(result)
+            # Format the result using IPython's standard formatting
+            format_dict, md_dict = self.compute_format_data(result)
 
-                # Make data serializable
-                if self.js_callback and format_dict:
-                    serializable_data = self._make_serializable(format_dict)
-                    serializable_metadata = self._make_serializable(md_dict or {})
-
-                    self.js_callback(
-                        self.execution_count, serializable_data, serializable_metadata
-                    )
-
-            except Exception as e:
-                # Log formatting errors to structured logs instead of stderr
-                print(
-                    f"[DISPLAY_HOOK_ERROR] ErrorWarning: Error formatting result: {e}",
-                    file=sys.stderr,
+            # Send to JavaScript if we have a callback
+            if self.js_callback and format_dict:
+                serializable_data = self._make_serializable(format_dict)
+                serializable_metadata = self._make_serializable(md_dict or {})
+                self.js_callback(
+                    self.execution_count, serializable_data, serializable_metadata
                 )
-                # Fallback to simple string representation
-                if self.js_callback:
-                    fallback_data = {"text/plain": str(result)}
-                    self.js_callback(self.execution_count, fallback_data, {})
+
+            # NOTE: We don't need to call the super because we're passing the result back in the callback
+            # super().__call__(result)
 
         return result
 
@@ -225,35 +231,30 @@ _original_show = plt.show
 
 
 def _capture_matplotlib_show(block=None):
-    """Capture matplotlib plots as high-quality SVG and send via display system"""
+    """Capture matplotlib plots as SVG and send via display system"""
     if plt.get_fignums():
         fig = plt.gcf()
         svg_buffer = io.StringIO()
 
         try:
-            # Save as SVG with high quality settings
             fig.savefig(
                 svg_buffer,
                 format="svg",
                 bbox_inches="tight",
                 facecolor="white",
                 edgecolor="none",
-                dpi=100,
-                transparent=False,
             )
             svg_content = svg_buffer.getvalue()
             svg_buffer.close()
 
-            # Use IPython's display system to show SVG
+            # Use IPython's display system
             from IPython.display import display, SVG
 
             display(SVG(svg_content))
 
-            # Clear the figure
             plt.clf()
-
         except Exception as e:
-            print(f"Error capturing matplotlib plot: {e}", file=sys.stderr)
+            print(f"Error capturing plot: {e}")
 
     return _original_show(block=block) if block is not None else _original_show()
 
@@ -268,47 +269,30 @@ def setup_rich_formatters():
     try:
         import pandas as pd
 
-        # Enhanced pandas display options
-        pd.set_option("display.max_rows", 100)
+        # Enhanced pandas display options for better notebook output
+        pd.set_option("display.max_rows", 50)
         pd.set_option("display.max_columns", 20)
         pd.set_option("display.width", None)
-        pd.set_option("display.max_colwidth", 50)
+        pd.set_option("display.max_colwidth", 100)
+        pd.set_option("display.precision", 4)
 
     except ImportError:
-        print("INFO: Pandas not available for rich formatting")
+        pass  # Pandas not available
 
     try:
         import numpy as np
 
         # Enhanced numpy display
-        np.set_printoptions(precision=4, suppress=True, linewidth=120)
+        np.set_printoptions(precision=4, suppress=True, linewidth=120, threshold=1000)
 
     except ImportError:
-        print("INFO: NumPy not available for rich formatting")
+        pass  # NumPy not available
 
 
 # Apply rich formatters
 setup_rich_formatters()
 
-
-def format_exception(exc_type, exc_value, exc_traceback):
-    """Format exceptions with standard Python traceback formatting"""
-    try:
-        # Use standard traceback formatting to preserve exception type information
-        return "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    except Exception as format_error:
-        # Log formatting errors to structured logs instead of stderr
-        print(
-            f"[FORMATTER_ERROR] Failed to format exception: {format_error}", flush=True
-        )
-        # Fallback to basic formatting
-        return f"{exc_type.__name__}: {exc_value}"
-
-
-# Override exception formatting
-sys.excepthook = lambda exc_type, exc_value, exc_traceback: print(
-    format_exception(exc_type, exc_value, exc_traceback), file=sys.stderr
-)
+print("🐍 IPython environment ready with rich display support")
 
 
 # Set up global callbacks (will be overridden by worker)

@@ -15,19 +15,19 @@ export function getEssentialPackages(): string[] {
     "matplotlib",
     "numpy",
     "pandas",
-    "polars",
-    "duckdb",
-    "pyarrow",
+    "polars", // Fast DataFrames
+    "duckdb", // SQL analytics
+    "pyarrow", // Arrow format for polars/duckdb interop
     "requests",
     "micropip",
     "pyodide-http",
-    "scipy",
-    "sympy",
-    "bokeh",
-    "scikit-learn",
-    "altair",
-    "geopandas",
-    "rich",
+    "scipy", // Scientific computing
+    "sympy", // Symbolic mathematics
+    "bokeh", // Interactive visualization
+    "scikit-learn", // Machine learning
+    "altair", // Statistical visualization
+    "geopandas", // Geospatial data analysis
+    "rich", // Beautiful terminal output with colors
     "networkx",
     "beautifulsoup4",
     "lxml",
@@ -40,8 +40,9 @@ export function getEssentialPackages(): string[] {
  * Get cache directory path for Pyodide packages
  */
 export function getCacheDir(): string {
-  // In Deno/web worker context, we'll use a simpler cache path
-  return "./.runt/pyodide-cache";
+  // Try to get home directory, fallback to local directory
+  const homeDir = Deno.env.get("HOME") || Deno.env.get("USERPROFILE") || ".";
+  return `${homeDir}/.runt/pyodide-cache`;
 }
 
 /**
@@ -59,15 +60,14 @@ export function getCacheConfig(): { packageCacheDir: string } {
  */
 export function getPreloadPackages(): string[] {
   return [
-    "numpy",
-    "pandas",
-    "matplotlib",
-    "scipy",
-    "requests",
-    "micropip",
-    "pyodide-http",
-    "ipython",
-    "rich",
+    "ipython", // Core interactive Python
+    "numpy", // Fundamental arrays and math
+    "pandas", // Data analysis
+    "matplotlib", // Plotting
+    "requests", // HTTP requests
+    "micropip", // Package management
+    "pyodide-http", // HTTP support
+    "rich", // Terminal formatting
   ];
 }
 
@@ -77,18 +77,36 @@ export function getPreloadPackages(): string[] {
  */
 export function getOnDemandPackages(): string[] {
   return [
-    "polars",
-    "duckdb",
-    "pyarrow",
-    "bokeh",
-    "scikit-learn",
-    "altair",
-    "geopandas",
-    "networkx",
-    "beautifulsoup4",
-    "lxml",
-    "pillow",
-    "statsmodels",
-    "sympy",
+    "scipy", // Scientific computing (larger package)
+    "polars", // Fast DataFrames
+    "duckdb", // SQL analytics
+    "pyarrow", // Arrow format
+    "bokeh", // Interactive visualization
+    "scikit-learn", // Machine learning
+    "altair", // Statistical visualization
+    "geopandas", // Geospatial analysis
+    "networkx", // Graph analysis
+    "beautifulsoup4", // Web scraping
+    "lxml", // XML processing
+    "pillow", // Image processing
+    "statsmodels", // Statistical modeling
+    "sympy", // Symbolic mathematics
   ];
+}
+
+/**
+ * Get packages that are commonly used together
+ * Useful for warming up cache or bulk loading
+ */
+export function getPackageGroups(): Record<string, string[]> {
+  return {
+    "data-science": ["numpy", "pandas", "matplotlib", "scipy", "scikit-learn"],
+    "web-scraping": ["requests", "beautifulsoup4", "lxml", "pyodide-http"],
+    "visualization": ["matplotlib", "bokeh", "altair"],
+    "dataframes": ["pandas", "polars", "pyarrow", "duckdb"],
+    "geospatial": ["geopandas", "matplotlib"],
+    "machine-learning": ["numpy", "pandas", "scikit-learn", "scipy"],
+    "symbolic": ["sympy", "numpy", "matplotlib"],
+    "network": ["networkx", "matplotlib"],
+  };
 }

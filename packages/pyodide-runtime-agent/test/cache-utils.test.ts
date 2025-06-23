@@ -10,7 +10,8 @@ import {
 Deno.test("getCacheDir", () => {
   const cacheDir = getCacheDir();
   assertEquals(typeof cacheDir, "string");
-  assertEquals(cacheDir, "./.runt/pyodide-cache");
+  // Should end with .runt/pyodide-cache regardless of home directory
+  assertEquals(cacheDir.endsWith("/.runt/pyodide-cache"), true);
 });
 
 Deno.test("getCacheConfig", () => {
