@@ -65,24 +65,43 @@ async function initializePyodide(
 
   // Get cache configuration and packages to load
   const { packageCacheDir } = getCacheConfig();
-  const packagesForInit = packagesToLoad || getEssentialPackages();
+  const basePackages = packagesToLoad || getEssentialPackages();
+
+  // Always ensure micropip and ipython are included for core functionality
+  const packagesForInit = Array.from(
+    new Set([
+      "micropip",
+      "ipython",
+      ...basePackages,
+    ]),
+  );
 
   self.postMessage({
     type: "log",
     data: `Using cache directory: ${packageCacheDir}`,
   });
 
-  // Load Pyodide with packages in parallel for faster initialization
+  // Load Pyodide with packages parameter (recommended by Pyodide docs)
   pyodide = await loadPyodide({
     packageCacheDir,
     packages: packagesForInit, // Load packages in parallel with Pyodide initialization
     stdout: (text: string) => {
+      // Log startup messages to our telemetry for debugging
+      self.postMessage({
+        type: "log",
+        data: `[Pyodide stdout on startup]: ${text}`,
+      });
       self.postMessage({
         type: "stream_output",
         data: { type: "stdout", text },
       });
     },
     stderr: (text: string) => {
+      // Log startup errors to our telemetry for debugging
+      self.postMessage({
+        type: "log",
+        data: `[Pyodide stderr on startup]: ${text}`,
+      });
       self.postMessage({
         type: "stream_output",
         data: { type: "stderr", text },
@@ -97,7 +116,7 @@ async function initializePyodide(
     self.postMessage({ type: "log", data: "Interrupt buffer configured" });
   }
 
-  // Packages are already loaded in parallel during Pyodide initialization
+  // Packages are loaded in parallel during Pyodide initialization
   self.postMessage({
     type: "log",
     data: `Packages loaded in parallel: ${packagesForInit.join(", ")}`,
@@ -106,9 +125,28 @@ async function initializePyodide(
   // Load our Python bootstrap file
   await setupIPythonEnvironment();
 
+  // Switch to clean stdout/stderr handlers after startup
+  pyodide.setStdout({
+    batched: (text: string) => {
+      self.postMessage({
+        type: "stream_output",
+        data: { type: "stdout", text },
+      });
+    },
+  });
+
+  pyodide.setStderr({
+    batched: (text: string) => {
+      self.postMessage({
+        type: "stream_output",
+        data: { type: "stderr", text },
+      });
+    },
+  });
+
   self.postMessage({
     type: "log",
-    data: "Enhanced Pyodide initialized successfully",
+    data: "Enhanced Pyodide worker initialized successfully",
   });
 }
 

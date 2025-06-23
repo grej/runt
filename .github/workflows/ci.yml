@@ -21,13 +21,13 @@ jobs:
           cache: true
 
       - name: Check formatting
-        run: deno fmt --check
+        run: deno task fmt:check
 
       - name: Run linter
-        run: deno lint
+        run: deno task lint
 
       - name: Type check
-        run: deno check packages/*/mod.ts packages/*/src/*.ts
+        run: deno task check
 
   test:
     name: Tests
@@ -43,10 +43,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: deno test --allow-env --allow-net --allow-read --coverage=cov/
-
-      - name: Generate coverage report
-        run: deno coverage --lcov cov/ > cov.lcov
+        run: deno task test:coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -71,11 +68,6 @@ jobs:
         run: |
           cd packages/lib
           timeout 10s deno run --allow-net --allow-env examples/echo-agent.ts --help || [ $? -eq 124 ]
-
-      - name: Test simple echo example
-        run: |
-          cd packages/lib
-          timeout 10s deno run --allow-net --allow-env examples/simple-echo.ts --help || [ $? -eq 124 ]
 
   package-check:
     name: Package Validation
@@ -145,7 +137,7 @@ jobs:
       - name: Performance test
         run: |
           # Simple timing test
-          time deno test --allow-env --allow-net --allow-read packages/lib/src/execution-context.test.ts
+          time deno task test:unit
 
   publish-check:
     name: Publish Check
@@ -161,15 +153,8 @@ jobs:
           deno-version: v2.x
           cache: true
 
-      - name: Dry run publish schema package
-        run: |
-          cd packages/schema
-          deno publish --dry-run --allow-slow-types
-
-      - name: Dry run publish lib package
-        run: |
-          cd packages/lib
-          deno publish --dry-run --allow-slow-types
+      - name: Dry run publish all packages
+        run: deno task publish:dry-run
 
   integration:
     name: Integration
@@ -185,9 +170,7 @@ jobs:
           cache: true
 
       - name: Run integration tests
-        run: |
-          # Run only integration tests
-          deno test --allow-env --allow-net --allow-read packages/lib/test/
+        run: deno task test:integration
 
       - name: Test cross-package imports
         run: |
@@ -221,7 +204,7 @@ jobs:
           cache: true
 
       - name: Run core tests
-        run: deno test --allow-env --allow-net --allow-read packages/lib/src/
+        run: deno task test:unit
 
   notify:
     name: Notify
