@@ -3,6 +3,14 @@ IPython Bootstrap Setup for Enhanced Pyodide Runtime
 
 This module sets up a complete IPython environment with rich display support,
 matplotlib integration, enhanced error formatting, and proper output handling.
+
+Note: For HTTPS requests, use the `requests` library instead of urllib:
+    import requests
+    import pandas as pd
+    from io import StringIO
+
+    response = requests.get("https://example.com/data.csv")
+    df = pd.read_csv(StringIO(response.text))
 """
 
 import os
@@ -289,7 +297,17 @@ def format_exception(exc_type, exc_value, exc_traceback):
         # Use IPython's enhanced traceback formatting
         from IPython.core.ultratb import VerboseTB
 
-        tb_formatter = VerboseTB(mode="Minimal", color_scheme="Neutral")
+        # Try different VerboseTB initialization approaches for compatibility
+        try:
+            tb_formatter = VerboseTB(mode="Minimal", color_scheme="Neutral")
+        except TypeError:
+            # Fallback for newer IPython versions that don't support mode parameter
+            try:
+                tb_formatter = VerboseTB(color_scheme="Neutral")
+            except TypeError:
+                # Final fallback with no parameters
+                tb_formatter = VerboseTB()
+
         formatted_tb = tb_formatter.format_exception(exc_type, exc_value, exc_traceback)
         return "".join(formatted_tb)
     except Exception as format_error:

@@ -20,6 +20,7 @@ export function getEssentialPackages(): string[] {
     "pyarrow", // Arrow format for polars/duckdb interop
     "requests",
     "micropip",
+    "pyodide-http", // Enable HTTPS support for urllib (needed for pandas.read_csv with URLs)
     "scipy", // Scientific computing
     "sympy", // Symbolic mathematics
     "bokeh", // Interactive visualization
@@ -64,6 +65,7 @@ export function getPreloadPackages(): string[] {
     "scipy",
     "requests",
     "micropip",
+    "pyodide-http", // Critical for pandas URL loading
     "ipython",
     "rich",
   ];
