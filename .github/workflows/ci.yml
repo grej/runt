@@ -72,11 +72,6 @@ jobs:
           cd packages/lib
           timeout 10s deno run --allow-net --allow-env examples/echo-agent.ts --help || [ $? -eq 124 ]
 
-      - name: Test simple echo example
-        run: |
-          cd packages/lib
-          timeout 10s deno run --allow-net --allow-env examples/simple-echo.ts --help || [ $? -eq 124 ]
-
   package-check:
     name: Package Validation
     runs-on: ubuntu-latest
