@@ -15,24 +15,24 @@ export function getEssentialPackages(): string[] {
     "matplotlib",
     "numpy",
     "pandas",
-    "polars", // Fast DataFrames
-    "duckdb", // SQL analytics
-    "pyarrow", // Arrow format for polars/duckdb interop
+    "polars",
+    "duckdb",
+    "pyarrow",
     "requests",
     "micropip",
-    "pyodide-http", // Enable HTTPS support for urllib (needed for pandas.read_csv with URLs)
-    "scipy", // Scientific computing
-    "sympy", // Symbolic mathematics
-    "bokeh", // Interactive visualization
-    "scikit-learn", // Machine learning
-    "altair", // Statistical visualization
-    "geopandas", // Geospatial data analysis
-    "rich", // Beautiful terminal output with colors
-    "networkx", // Network analysis
-    "beautifulsoup4", // Web scraping
-    "lxml", // XML/HTML parsing
-    "pillow", // Image processing
-    "statsmodels", // Statistical modeling
+    "pyodide-http",
+    "scipy",
+    "sympy",
+    "bokeh",
+    "scikit-learn",
+    "altair",
+    "geopandas",
+    "rich",
+    "networkx",
+    "beautifulsoup4",
+    "lxml",
+    "pillow",
+    "statsmodels",
   ];
 }
 
@@ -65,7 +65,7 @@ export function getPreloadPackages(): string[] {
     "scipy",
     "requests",
     "micropip",
-    "pyodide-http", // Critical for pandas URL loading
+    "pyodide-http",
     "ipython",
     "rich",
   ];
