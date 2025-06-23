@@ -1,6 +1,6 @@
 {
   "name": "@runt/pyodide-runtime-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Python runtime agent using Pyodide with IPython integration",
   "license": "MIT",
   "repository": {
@@ -8,13 +8,18 @@
     "url": "https://github.com/runtimed/anode.git"
   },
   "exports": {
-    ".": "./src/mod.ts"
+    ".": "./src/mod.ts",
+    "./lib": "./src/lib.ts"
+  },
+  "bin": {
+    "pyrunt": "./src/mod.ts"
   },
   "imports": {
-    "@runt/lib": "../lib/mod.ts",
-    "@runt/schema": "../schema/mod.ts",
+    "@runt/lib": "jsr:@runt/lib@^0.1.0",
+    "@runt/schema": "jsr:@runt/schema@^0.1.0",
     "npm:pyodide": "npm:pyodide@^0.27.7",
-    "@std/async": "jsr:@std/async@^1.0.0"
+    "@std/async": "jsr:@std/async@^1.0.0",
+    "npm:@livestore/livestore": "npm:@livestore/livestore@^0.3.1"
   },
   "tasks": {
     "dev": "deno run --allow-all --env-file=.env src/pyodide-agent.ts",
