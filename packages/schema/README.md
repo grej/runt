@@ -1,6 +1,6 @@
 # @runt/schema
 
-LiveStore schema for notebooks. Events, tables, and types.
+LiveStore schema for anode notebooks. Events, tables, and types.
 
 ```typescript
 import { events, schema, tables } from "jsr:@runt/schema";

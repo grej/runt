@@ -1,25 +1,13 @@
 # Runt
 
-Runtime agents for connecting to notebooks. Deno/TypeScript prototype using
-LiveStore for event-sourcing and real-time sync.
-
-Working system with end-to-end Python execution. Deno/TypeScript prototype.
+Runtime agents for connecting to next gen notebooks from
+[Anode](https://github.com/rgbkrk/anode).
 
 ## Packages
 
 - `@runt/schema` - LiveStore schema (events, tables, types)
 - `@runt/lib` - Runtime agent base class
 - `@runt/pyodide-runtime-agent` - Python runtime using Pyodide
-
-## Status
-
-What works:
-
-- Python code execution via Pyodide
-- Jupyter-compatible outputs (stdout, stderr, rich displays)
-- LiveStore event-sourcing and sync
-- CLI configuration
-- Real-time collaboration
 
 ## Usage
 
