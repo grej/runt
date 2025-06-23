@@ -84,11 +84,16 @@ export class PyodideRuntimeAgent {
       console.error(error instanceof Error ? error.message : String(error));
       console.error("\nExample usage:");
       console.error(
-        "  deno run --allow-all --env-file=.env pyodide-agent.ts --notebook my-notebook --auth-token your-token",
+        '  deno run --allow-all "jsr:@runt/pyodide-runtime-agent" --notebook my-notebook --auth-token your-token',
       );
       console.error("\nOr set environment variables in .env:");
       console.error("  NOTEBOOK_ID=my-notebook");
       console.error("  AUTH_TOKEN=your-token");
+      console.error("\nOr install globally:");
+      console.error(
+        "  deno install -gf --allow-all jsr:@runt/pyodide-runtime-agent",
+      );
+      console.error("  pyrunt --notebook my-notebook --auth-token your-token");
       Deno.exit(1);
     }
 

@@ -88,16 +88,17 @@ export class RuntOpenAIClient {
   private logger = createLogger("openai-client");
 
   constructor(config?: OpenAIConfig) {
-    this.configure(config);
+    // Don't configure immediately to avoid early initialization logs
+    if (config) {
+      this.configure(config);
+    }
   }
 
   configure(config?: OpenAIConfig) {
     const apiKey = config?.apiKey || Deno.env.get("OPENAI_API_KEY");
 
     if (!apiKey) {
-      this.logger.warn(
-        "OpenAI API key not found. Set OPENAI_API_KEY environment variable or pass apiKey in config.",
-      );
+      // Don't log warning at startup - only when actually trying to use OpenAI
       this.isConfigured = false;
       return;
     }
@@ -117,6 +118,10 @@ export class RuntOpenAIClient {
   }
 
   isReady(): boolean {
+    // Try to configure if not already configured and not already failed
+    if (!this.isConfigured && this.client === null) {
+      this.configure();
+    }
     return this.isConfigured && this.client !== null;
   }
 
@@ -508,7 +513,7 @@ export class RuntOpenAIClient {
   }
 }
 
-// Export singleton instance
+// Export singleton instance - will only configure when first used
 export const openaiClient = new RuntOpenAIClient();
 
 // Export class for testing
