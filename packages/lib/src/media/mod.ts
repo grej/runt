@@ -1,22 +1,28 @@
 /**
- * Media Module - Jupyter-compatible Rich Content System
+ * # Media Types for AI-Aware Runtime Agents
  *
- * This module provides a comprehensive system for handling rich media content
- * in Jupyter-compatible environments. It includes type definitions, utilities,
- * and validation functions for working with MIME bundles.
+ * When your Python code outputs tables, plots, or rich data, it creates multiple
+ * representations - HTML for humans, JSON for data, plain text for accessibility.
+ * But which format should we send to AI models?
  *
- * @example
+ * This module helps runtime agents convert Jupyter-style rich output into formats
+ * that work well with Large Language Models.
+ *
+ * ## Quick Start
+ *
  * ```typescript
- * import { MediaBundle, findRichestMediaType, ensureTextPlainFallback } from "@runt/lib/media";
+ * import { toAIMediaBundle, validateMediaBundle } from "@runt/lib/media";
  *
- * const bundle: MediaBundle = {
- *   "text/plain": "Hello, world!",
- *   "text/html": "<h1>Hello, world!</h1>",
- *   "application/json": { message: "Hello, world!" }
+ * // Raw output from Python execution
+ * const rawOutput = {
+ *   "text/html": "<table><tr><td>Revenue: $50K</td></tr></table>",
+ *   "text/markdown": "| Revenue |\n|$50K|",
+ *   "application/json": { revenue: 50000, currency: "USD" }
  * };
  *
- * const richest = findRichestMediaType(bundle); // "text/html"
- * const withFallback = ensureTextPlainFallback(bundle);
+ * // Convert for AI consumption (prefers markdown, keeps structured data)
+ * const aiBundle = toAIMediaBundle(rawOutput);
+ * // Send this to your AI model for better understanding
  * ```
  */
 

@@ -1,13 +1,23 @@
 /**
- * Cache utilities for Pyodide package management
+ * # Python Package Management for Pyodide
  *
- * This module provides utilities for managing Pyodide package caching
- * and defines essential packages for a good development experience.
+ * When you start a Python runtime in the browser, you want common packages
+ * like numpy and pandas ready to go. But loading 20+ packages takes time.
+ *
+ * This module organizes packages into groups for smart loading:
+ * - Essential: Always loaded (numpy, pandas, matplotlib, etc.)
+ * - Preload: Core packages loaded first for fast startup
+ * - On-demand: Useful packages loaded as needed
+ *
+ * The cache directory stores downloaded packages locally so subsequent
+ * notebook sessions start faster.
  */
 
 /**
- * Get essential packages for Pyodide kernel initialization
- * These are loaded by default to provide a good development experience
+ * Essential packages loaded by default in every Python runtime
+ *
+ * Covers data science, visualization, and web requests - the most
+ * common needs for notebook computing.
  */
 export function getEssentialPackages(): string[] {
   return [
@@ -37,7 +47,7 @@ export function getEssentialPackages(): string[] {
 }
 
 /**
- * Get cache directory path for Pyodide packages
+ * Where Pyodide packages are cached locally for faster loading
  */
 export function getCacheDir(): string {
   // Try to get home directory, fallback to local directory
@@ -46,7 +56,7 @@ export function getCacheDir(): string {
 }
 
 /**
- * Get cache configuration for Pyodide loadPyodide() options
+ * Cache config object for Pyodide initialization
  */
 export function getCacheConfig(): { packageCacheDir: string } {
   return {
@@ -55,8 +65,9 @@ export function getCacheConfig(): { packageCacheDir: string } {
 }
 
 /**
- * Get packages that should be pre-loaded for performance
- * These are the most commonly used packages that significantly improve startup time
+ * High-priority packages loaded first for fast startup
+ *
+ * These cover 80% of common use cases and load quickly.
  */
 export function getPreloadPackages(): string[] {
   return [
@@ -72,8 +83,9 @@ export function getPreloadPackages(): string[] {
 }
 
 /**
- * Get packages that can be loaded on-demand
- * These are useful but not essential for basic functionality
+ * Useful packages loaded as needed to avoid startup bloat
+ *
+ * Still part of the essential set but lower priority.
  */
 export function getOnDemandPackages(): string[] {
   return [

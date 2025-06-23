@@ -1,15 +1,37 @@
 /**
- * Media Type System for Jupyter-compatible Rich Content
+ * # Media Types for AI-Aware Notebooks
  *
- * This module provides types and utilities for working with rich media content
- * in Jupyter messages, inspired by the jupyter-protocol Rust implementation.
+ * When Python objects are displayed in Jupyter notebooks, they can provide multiple
+ * representations - HTML for rich display, plain text for accessibility, JSON for
+ * data interchange. But what format works best for AI?
  *
- * Supports the full range of Jupyter media types including:
- * - Text formats (plain, html, markdown, latex)
- * - Application formats (json, javascript)
- * - Image formats (png, jpeg, svg, gif)
- * - Jupyter extensions (widgets, plotly, vega, etc.)
- * - Custom +json formats for extensibility
+ * This module helps convert rich Jupyter output into formats that work well with
+ * Large Language Models while preserving the flexibility to extend with custom types.
+ *
+ * ## Example: Converting Rich Output for AI
+ *
+ * ```typescript
+ * const richOutput = {
+ *   "text/html": "<table><tr><td>Data</td></tr></table>",
+ *   "text/markdown": "| Data |\n|------|",
+ *   "application/json": { rows: [{ data: "Data" }] },
+ *   "image/png": "base64-encoded-chart"
+ * };
+ *
+ * // Convert to AI-friendly formats
+ * const aiOutput = toAIMediaBundle(richOutput);
+ * // Result: markdown (better for LLMs than HTML), JSON, and images
+ * // { "text/markdown": "| Data |\n|------|", "application/json": {...}, "image/png": "..." }
+ * ```
+ *
+ * ## Custom Media Types
+ *
+ * Any `application/*+json` media type is automatically recognized:
+ *
+ * ```typescript
+ * isJsonMimeType("application/vnd.anode.aitool+json") // true
+ * isJsonMimeType("application/vnd.plotly.v1+json")    // true
+ * ```
  */
 
 /**
@@ -143,11 +165,26 @@ export function isTextBasedMimeType(mimeType: string): boolean {
 }
 
 /**
- * Convert a media bundle to AI-friendly formats
- * Prioritizes formats that work well with LLMs:
- * - Markdown over HTML for text content
- * - Plain text fallbacks
- * - JSON for structured data
+ * Convert rich Jupyter output to AI-friendly formats
+ *
+ * AI models work better with certain formats:
+ * - Markdown is more compact and structured than HTML
+ * - JSON preserves data structure for reasoning
+ * - Images work with vision-capable models
+ * - Plain text provides universal fallback
+ *
+ * @example
+ * ```typescript
+ * const bundle = {
+ *   "text/html": "<h1>Sales Report</h1><p>Revenue: $10,000</p>",
+ *   "text/markdown": "# Sales Report\n\nRevenue: $10,000",
+ *   "application/json": { revenue: 10000, currency: "USD" }
+ * };
+ *
+ * const aiBundle = toAIMediaBundle(bundle);
+ * // Prefers markdown over HTML, keeps JSON structure
+ * // { "text/markdown": "# Sales Report\n\nRevenue: $10,000", "application/json": {...} }
+ * ```
  */
 export function toAIMediaBundle(bundle: MediaBundle): MediaBundle {
   const result: MediaBundle = {};
@@ -184,7 +221,17 @@ export function toAIMediaBundle(bundle: MediaBundle): MediaBundle {
 }
 
 /**
- * Ensure a media bundle has a text/plain fallback representation
+ * Every media bundle should have text/plain for maximum compatibility
+ *
+ * Some AI providers only support text, and text/plain ensures your output
+ * is never completely invisible to an AI system.
+ *
+ * @example
+ * ```typescript
+ * const bundle = { "text/html": "<b>Important data</b>" };
+ * const withFallback = ensureTextPlainFallback(bundle);
+ * // { "text/html": "<b>Important data</b>", "text/plain": "Important data" }
+ * ```
  */
 export function ensureTextPlainFallback(bundle: MediaBundle): MediaBundle {
   if (bundle["text/plain"]) {
@@ -226,7 +273,23 @@ export function ensureTextPlainFallback(bundle: MediaBundle): MediaBundle {
 }
 
 /**
- * Validate and clean a media bundle, ensuring proper types for each MIME type
+ * Clean up media bundles to ensure consistent types
+ *
+ * Raw output from Python can have inconsistent types - JSON as strings,
+ * numbers as strings, etc. This normalizes everything.
+ *
+ * @example
+ * ```typescript
+ * const rawBundle = {
+ *   "application/json": '{"value": 42}',  // JSON as string
+ *   "text/plain": 123,                    // Number as text
+ *   "text/html": null                     // Invalid value
+ * };
+ *
+ * const clean = validateMediaBundle(rawBundle);
+ * // { "application/json": {value: 42}, "text/plain": "123" }
+ * // (null values removed, types corrected)
+ * ```
  */
 export function validateMediaBundle(bundle: MediaBundle): MediaBundle {
   const result: MediaBundle = {};
