@@ -19,6 +19,9 @@ export {
   getPreloadPackages,
 } from "./cache-utils.ts";
 
+// Export OpenAI client for AI cell support
+export { OpenAIClient, openaiClient } from "./openai-client.ts";
+
 // Re-export useful types from @runt/lib for convenience
 export type {
   CancellationHandler,

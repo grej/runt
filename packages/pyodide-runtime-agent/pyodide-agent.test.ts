@@ -134,7 +134,7 @@ Deno.test("PyodideRuntimeAgent configuration", async (t) => {
     assertEquals(agent.config.kernelType, "python3-pyodide");
     assertEquals(agent.config.capabilities.canExecuteCode, true);
     assertEquals(agent.config.capabilities.canExecuteSql, false);
-    assertEquals(agent.config.capabilities.canExecuteAi, false);
+    assertEquals(agent.config.capabilities.canExecuteAi, true);
   });
 
   await t.step("should have correct kernel type and capabilities", () => {
@@ -151,7 +151,7 @@ Deno.test("PyodideRuntimeAgent configuration", async (t) => {
     assertEquals(agent.config.kernelType, "python3-pyodide");
     assertEquals(agent.config.capabilities.canExecuteCode, true);
     assertEquals(agent.config.capabilities.canExecuteSql, false);
-    assertEquals(agent.config.capabilities.canExecuteAi, false);
+    assertEquals(agent.config.capabilities.canExecuteAi, true);
   });
 });
 
