@@ -6,8 +6,8 @@ agent library.
 ## Project Overview
 
 Runt is a TypeScript/Deno library for building runtime agents that connect to
-Anode notebooks. It uses LiveStore for event-sourcing and real-time sync between
-multiple users.
+[Anode notebooks](https://github.com/rgbkrk/anode). It uses LiveStore for
+event-sourcing and real-time sync between multiple users.
 
 **Current Status**: Working system with 29 passing tests. Core functionality is
 implemented and published to JSR. The system is a working prototype with Python
@@ -110,7 +110,8 @@ not queried during materialization.
 **Import errors**: Make sure all imports use the workspace aliases
 (`@runt/schema`, `@runt/lib`) or relative paths correctly.
 
-**Test permissions**: Tests need `--allow-env --allow-net --allow-read` flags.
+**Test permissions**: Tests need
+`--allow-env --allow-net --allow-read --allow-write --allow-sys` flags.
 
 **Publishing**: Requires `--allow-slow-types` flag due to LiveStore's complex
 types.
@@ -124,9 +125,8 @@ don't return data from the execution handler.
 - **Integration tests**: Cross-package interactions in `test/`
 - **Example tests**: Ensure examples work in `examples/`
 
-Run tests with: `deno test --allow-env --allow-net --allow-read`
-
-Current test count: 29 passing, 0 failing
+Run tests with:
+`deno test --allow-env --allow-net --allow-read --allow-write --allow-sys`
 
 ## Dependencies
 

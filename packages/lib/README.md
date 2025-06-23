@@ -1,7 +1,7 @@
 # @runt/lib
 
-Runtime agent base class. Connects to LiveStore, processes execution queues,
-handles outputs.
+Runtime agent base class. Connects to [Anode](https://github.com/rgbkrk/anode),
+processes execution queues, handles outputs.
 
 ## Usage
 
@@ -37,7 +37,7 @@ await agent.keepAlive();
 
 ```bash
 --notebook <id>           # Required
---auth-token <token>      # Required  
+--auth-token <token>      # Required
 --kernel-type <type>      # Optional
 --sync-url <url>          # Optional
 ```
