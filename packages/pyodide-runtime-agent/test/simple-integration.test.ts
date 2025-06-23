@@ -30,7 +30,7 @@ Deno.test("PyodideRuntimeAgent - Basic Functionality", async (t) => {
     assertEquals(agent.config.authToken, "test-token");
     assertEquals(agent.config.capabilities.canExecuteCode, true);
     assertEquals(agent.config.capabilities.canExecuteSql, false);
-    assertEquals(agent.config.capabilities.canExecuteAi, false);
+    assertEquals(agent.config.capabilities.canExecuteAi, true);
   });
 
   await t.step("generates unique session IDs", () => {

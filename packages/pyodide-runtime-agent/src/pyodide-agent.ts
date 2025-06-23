@@ -9,7 +9,35 @@ import type { ExecutionContext } from "@runt/lib";
 import { createLogger } from "@runt/lib";
 import { getEssentialPackages } from "./cache-utils.ts";
 import type { Store } from "npm:@livestore/livestore";
-import type { schema } from "@runt/schema";
+import {
+  type CellData,
+  events,
+  type OutputData as SchemaOutputData,
+  schema,
+  tables,
+} from "@runt/schema";
+import { openaiClient } from "./openai-client.ts";
+import stripAnsi from "npm:strip-ansi";
+
+/**
+ * Type definitions for AI context generation - exported for reuse in other runtime agents
+ */
+export interface CellContextData {
+  id: string;
+  cellType: string;
+  source: string;
+  position: number;
+  outputs: Array<{
+    outputType: string;
+    data: Record<string, unknown>;
+  }>;
+}
+
+export interface NotebookContextData {
+  previousCells: CellContextData[];
+  totalCells: number;
+  currentCellPosition: number;
+}
 
 /**
  * Configuration options for PyodideRuntimeAgent
@@ -47,7 +75,7 @@ export class PyodideRuntimeAgent {
         capabilities: {
           canExecuteCode: true,
           canExecuteSql: false,
-          canExecuteAi: false,
+          canExecuteAi: true,
         },
       });
     } catch (error) {
@@ -246,7 +274,7 @@ export class PyodideRuntimeAgent {
   }
 
   /**
-   * Execute Python code using Pyodide worker
+   * Execute Python code or AI prompts using Pyodide worker or OpenAI
    */
   private async executePython(context: ExecutionContext) {
     const {
@@ -257,6 +285,11 @@ export class PyodideRuntimeAgent {
       abortSignal,
     } = context;
     const code = cell.source?.trim() || "";
+
+    // Handle AI cells differently
+    if (cell.cellType === "ai") {
+      return this.executeAI(context);
+    }
 
     if (!this.isInitialized || !this.worker) {
       throw new Error("Pyodide worker not initialized");
@@ -435,6 +468,491 @@ export class PyodideRuntimeAgent {
     }
 
     this.logger.info("Pyodide worker cleanup completed");
+  }
+
+  /**
+   * Execute AI prompts using OpenAI
+   */
+  private async executeAI(context: ExecutionContext) {
+    const {
+      cell,
+      stderr,
+      result,
+      error,
+      abortSignal,
+    } = context;
+    const prompt = cell.source?.trim() || "";
+
+    if (!prompt) {
+      return { success: true };
+    }
+
+    try {
+      if (abortSignal.aborted) {
+        stderr("🛑 AI execution was already cancelled\n");
+        return { success: false, error: "Execution cancelled" };
+      }
+
+      this.logger.info("Executing AI prompt", {
+        cellId: cell.id,
+        provider: cell.aiProvider || "openai",
+        model: cell.aiModel || "gpt-4o-mini",
+        promptLength: prompt.length,
+      });
+
+      // Gather notebook context for AI awareness
+      const context_data = await this.gatherNotebookContext(cell);
+      this.logger.info("Gathered notebook context", {
+        previousCells: context_data.previousCells.length,
+        totalCells: context_data.totalCells,
+      });
+
+      // Use real OpenAI API if configured, otherwise fall back to mock
+      if (
+        openaiClient.isReady() &&
+        (cell.aiProvider === "openai" || !cell.aiProvider)
+      ) {
+        const outputs = await openaiClient.generateResponse(prompt, {
+          model: cell.aiModel || "gpt-4o-mini",
+          provider: cell.aiProvider || "openai",
+          systemPrompt: this.buildSystemPromptWithContext(context_data),
+          enableTools: true,
+          currentCellId: cell.id,
+          onToolCall: async (toolCall) => {
+            this.logger.info("AI requested tool call", {
+              toolName: toolCall.name,
+              cellId: cell.id,
+            });
+            await this.handleToolCall(cell, toolCall);
+          },
+        });
+
+        this.logger.info("Generated AI outputs", { count: outputs.length });
+
+        // Send outputs to execution context
+        outputs.forEach((output) => {
+          if (output.type === "display_data") {
+            context.display(output.data, output.metadata || {});
+          } else if (output.type === "execute_result") {
+            result(output.data);
+          } else if (output.type === "error" && output.data) {
+            const errorData = output.data as {
+              ename?: string;
+              evalue?: string;
+              traceback?: string[];
+            };
+            error(
+              errorData.ename || "AIError",
+              errorData.evalue || "Unknown error",
+              errorData.traceback || ["Unknown error"],
+            );
+          }
+        });
+      } else {
+        // Generate fake AI response for development/testing
+        const outputs = await this.generateFakeAiResponse(cell, context_data);
+        this.logger.info("Generated fake AI outputs", {
+          count: outputs.length,
+        });
+
+        outputs.forEach((output) => {
+          if (
+            output.type === "display_data" || output.type === "execute_result"
+          ) {
+            context.display(output.data, output.metadata || {});
+          } else if (output.type === "error" && output.data) {
+            const errorData = output.data as {
+              ename?: string;
+              evalue?: string;
+              traceback?: string[];
+            };
+            error(
+              errorData.ename || "AIError",
+              errorData.evalue || "Unknown error",
+              errorData.traceback || ["Unknown error"],
+            );
+          }
+        });
+      }
+
+      return { success: true };
+    } catch (err) {
+      if (
+        abortSignal.aborted ||
+        (err instanceof Error && err.message.includes("cancelled"))
+      ) {
+        stderr("🛑 AI execution was cancelled\n");
+        return { success: false, error: "Execution cancelled" };
+      }
+
+      // Handle AI errors
+      if (err instanceof Error) {
+        const errorLines = err.message.split("\n");
+        const errorName = errorLines[0] || "AIError";
+        const errorValue = errorLines[1] || err.message;
+        const traceback = errorLines.length > 2 ? errorLines : [err.message];
+
+        error(errorName, errorValue, traceback);
+        return { success: false, error: errorValue };
+      }
+
+      throw err;
+    }
+  }
+
+  /**
+   * Gather context from previous cells for AI execution
+   */
+  public gatherNotebookContext(currentCell: CellData): NotebookContextData {
+    // Query all cells that come before the current cell AND are visible to AI
+    const allCells = this.store.query(
+      tables.cells.select().orderBy("position", "asc"),
+    ) as CellData[];
+
+    const previousCells = allCells
+      .filter((cell: CellData) =>
+        cell.position < currentCell.position &&
+        cell.aiContextVisible !== false
+      )
+      .map((cell: CellData) => {
+        // Get outputs for each cell
+        const outputs = this.store.query(
+          tables.outputs
+            .select()
+            .where({ cellId: cell.id })
+            .orderBy("position", "asc"),
+        ) as SchemaOutputData[];
+
+        // Filter outputs to only include text/plain and text/markdown for AI context
+        const filteredOutputs = outputs.map((output: SchemaOutputData) => {
+          const outputData = output.data;
+          const filteredData: Record<string, unknown> = {};
+
+          if (outputData && typeof outputData === "object") {
+            if (outputData["text/plain"]) {
+              filteredData["text/plain"] = outputData["text/plain"];
+            }
+            if (outputData["text/markdown"]) {
+              filteredData["text/markdown"] = outputData["text/markdown"];
+            }
+            // For stream outputs, include the text directly
+            if (outputData.text && outputData.name) {
+              filteredData.text = outputData.text;
+              filteredData.name = outputData.name;
+            }
+            // For error outputs, include error info
+            if (outputData.ename && outputData.evalue) {
+              filteredData.ename = outputData.ename;
+              filteredData.evalue = outputData.evalue;
+              if (outputData.traceback) {
+                filteredData.traceback = outputData.traceback;
+              }
+            }
+          }
+
+          return {
+            outputType: output.outputType,
+            data: Object.keys(filteredData).length > 0
+              ? filteredData
+              : (outputData as Record<string, unknown>),
+          };
+        });
+
+        return {
+          id: cell.id,
+          cellType: cell.cellType,
+          source: cell.source || "",
+          position: cell.position,
+          outputs: filteredOutputs,
+        };
+      });
+
+    return {
+      previousCells,
+      totalCells: allCells.length,
+      currentCellPosition: currentCell.position,
+    };
+  }
+
+  /**
+   * Build system prompt with notebook context
+   */
+  public buildSystemPromptWithContext(context: NotebookContextData): string {
+    let systemPrompt =
+      `You are a helpful AI assistant in a Jupyter-like notebook environment. You have access to the context of previous cells in the notebook.
+
+**Notebook Context:**
+- Total cells: ${context.totalCells}
+- Current cell position: ${context.currentCellPosition}
+- Previous cells visible to AI: ${context.previousCells.length}
+
+**Previous Cell Contents (only cells marked as visible to AI):**
+`;
+
+    if (context.previousCells.length === 0) {
+      systemPrompt +=
+        "No previous cells are visible to AI in this notebook (either no previous cells exist or they have been hidden from AI context).\n";
+    } else {
+      context.previousCells.forEach((cell, index) => {
+        systemPrompt += `
+Cell ${index + 1} (Position ${cell.position}, Type: ${cell.cellType}):
+\`\`\`${cell.cellType === "code" ? "python" : cell.cellType}
+${cell.source}
+\`\`\`
+`;
+
+        // Include outputs if they exist
+        if (cell.outputs && cell.outputs.length > 0) {
+          systemPrompt += `
+Output:
+`;
+          cell.outputs.forEach((output) => {
+            if (output.outputType === "stream") {
+              // Handle stream outputs (stdout/stderr)
+              if (output.data.text && typeof output.data.text === "string") {
+                systemPrompt += `\`\`\`
+${this.stripAnsi(output.data.text)}
+\`\`\`
+`;
+              }
+            } else if (output.outputType === "error") {
+              // Handle error outputs
+              if (
+                output.data.ename && typeof output.data.ename === "string" &&
+                output.data.evalue && typeof output.data.evalue === "string"
+              ) {
+                systemPrompt += `\`\`\`
+Error: ${this.stripAnsi(output.data.ename)}: ${
+                  this.stripAnsi(output.data.evalue)
+                }
+\`\`\`
+`;
+              }
+            } else if (
+              output.outputType === "execute_result" ||
+              output.outputType === "display_data"
+            ) {
+              // Handle rich outputs
+              if (
+                output.data["text/plain"] &&
+                typeof output.data["text/plain"] === "string"
+              ) {
+                systemPrompt += `\`\`\`
+${this.stripAnsi(output.data["text/plain"])}
+\`\`\`
+`;
+              }
+              if (output.data["text/markdown"]) {
+                systemPrompt += `
+${output.data["text/markdown"]}
+`;
+              }
+            }
+          });
+        }
+      });
+    }
+
+    systemPrompt += `
+**Instructions:**
+- Provide clear, concise responses and include code examples when appropriate
+- Reference previous cells when relevant to provide context-aware assistance
+- If you see variables, functions, or data structures defined in previous cells, you can reference them
+- You can see the outputs from previous code executions to understand the current state
+- Help with debugging, optimization, or extending the existing code
+- Suggest next steps based on the notebook's progression`;
+
+    return systemPrompt;
+  }
+
+  /**
+   * Handle tool calls from AI
+   */
+  private handleToolCall(currentCell: CellData, toolCall: {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }): void {
+    const { name, arguments: args } = toolCall;
+
+    switch (name) {
+      case "create_cell": {
+        const cellType = String(args.cellType || "code");
+        const content = String(args.content || "");
+        const position = String(args.position || "after_current");
+
+        // Calculate position for new cell
+        const newPosition = this.calculateNewCellPosition(
+          currentCell,
+          position,
+        );
+
+        // Generate unique cell ID
+        const newCellId = `cell-${Date.now()}-${
+          Math.random().toString(36).slice(2)
+        }`;
+
+        this.logger.info("Creating cell via AI tool call", {
+          cellType,
+          position: newPosition,
+          contentLength: content.length,
+        });
+
+        // Create the new cell
+        this.store.commit(
+          events.cellCreated({
+            id: newCellId,
+            cellType: cellType as "code" | "markdown" | "raw" | "sql" | "ai",
+            position: newPosition,
+            createdBy: `ai-assistant-${this.config.sessionId}`,
+          }),
+        );
+
+        // Set the cell source if provided
+        if (content.length > 0) {
+          this.store.commit(
+            events.cellSourceChanged({
+              id: newCellId,
+              source: content,
+              modifiedBy: `ai-assistant-${this.config.sessionId}`,
+            }),
+          );
+        }
+
+        this.logger.info("Created cell successfully", {
+          cellId: newCellId,
+          contentPreview: content.slice(0, 100),
+        });
+        break;
+      }
+
+      default:
+        this.logger.warn("Unknown AI tool", { toolName: name });
+    }
+  }
+
+  /**
+   * Calculate new cell position based on placement preference
+   */
+  private calculateNewCellPosition(
+    currentCell: CellData,
+    placement: string,
+  ): number {
+    const allCells = this.store.query(
+      tables.cells.select().orderBy("position", "asc"),
+    ) as CellData[];
+
+    switch (placement) {
+      case "before_current":
+        return currentCell.position - 0.1;
+      case "at_end": {
+        const maxPosition = allCells.length > 0
+          ? Math.max(...allCells.map((c: CellData) => c.position))
+          : 0;
+        return maxPosition + 1;
+      }
+      case "after_current":
+      default:
+        return currentCell.position + 0.1;
+    }
+  }
+
+  /**
+   * Generate fake AI response for testing with rich output support
+   */
+  private async generateFakeAiResponse(
+    cell: CellData,
+    context?: {
+      previousCells: Array<{
+        id: string;
+        cellType: string;
+        source: string;
+        position: number;
+        outputs: Array<{
+          outputType: string;
+          data: Record<string, unknown>;
+        }>;
+      }>;
+      totalCells: number;
+      currentCellPosition: number;
+    },
+  ): Promise<
+    Array<{
+      type: string;
+      data: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }>
+  > {
+    const provider = cell.aiProvider || "openai";
+    const model = cell.aiModel || "gpt-4o-mini";
+    const prompt = cell.source || "";
+
+    // Simulate AI thinking time (reduced for better dev experience)
+    await new Promise((resolve) =>
+      setTimeout(resolve, 200 + Math.random() * 500)
+    );
+
+    // Generate context-aware response
+    let contextInfo = "";
+    if (context && context.previousCells.length > 0) {
+      contextInfo = `
+
+## 📚 Notebook Context Analysis
+
+I can see **${context.previousCells.length} previous cells** in this notebook:
+
+`;
+      context.previousCells.forEach((cell, index) => {
+        const preview = cell.source.slice(0, 100);
+        contextInfo += `- **Cell ${index + 1}** (${cell.cellType}): ${preview}${
+          cell.source.length > 100 ? "..." : ""
+        }\n`;
+      });
+    } else if (context) {
+      contextInfo =
+        "\n\n## 📚 Notebook Context\n\nThis appears to be the first cell in your notebook.\n";
+    }
+
+    const response = `I understand you're asking: "${prompt}"
+
+This is a **mock response** from \`${model}\` with notebook context awareness.${contextInfo}
+
+## 🔍 Analysis & Suggestions
+
+Based on your prompt and notebook context:
+- 💡 **Context Understanding**: I can see the progression of your work
+- 📊 **Data Insights**: Previous cells provide valuable context
+- 🚀 **Next Steps**: Building on existing code and variables
+
+\`\`\`python
+# Example based on notebook context
+import pandas as pd
+df = pd.read_csv('data.csv')
+df.head()
+\`\`\`
+
+> **Note**: This is a simulated response. Real AI integration will provide deeper context analysis.`;
+
+    return [{
+      type: "execute_result",
+      data: {
+        "text/markdown": response,
+        "text/plain": response.replace(/[#*`>|\-]/g, "").replace(/\n+/g, "\n")
+          .trim(),
+      },
+      metadata: {
+        "anode/ai_response": true,
+        "anode/ai_provider": provider,
+        "anode/ai_model": model,
+      },
+    }];
+  }
+
+  /**
+   * Strip ANSI escape codes from text for AI consumption
+   */
+  private stripAnsi(text: string): string {
+    return stripAnsi(text);
   }
 }
 

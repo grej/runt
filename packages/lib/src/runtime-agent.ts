@@ -35,6 +35,7 @@ export class RuntimeAgent {
   private subscriptions: (() => void)[] = [];
   private activeExecutions = new Map<string, AbortController>();
   private cancellationHandlers: CancellationHandler[] = [];
+  private signalHandlers = new Map<string, () => void>();
 
   constructor(
     private config: RuntimeConfig,
@@ -161,6 +162,9 @@ export class RuntimeAgent {
           });
         }
       }
+
+      // Clean up signal handlers
+      this.cleanupSignalHandlers();
 
       // Close LiveStore connection
       if (this.store) {
@@ -645,8 +649,12 @@ export class RuntimeAgent {
   private setupShutdownHandlers(): void {
     const shutdown = () => this.shutdown();
 
-    Deno.addSignalListener("SIGINT", shutdown);
-    Deno.addSignalListener("SIGTERM", shutdown);
+    // Store signal handlers for cleanup
+    this.signalHandlers.set("SIGINT", shutdown);
+    this.signalHandlers.set("SIGTERM", shutdown);
+
+    Deno.addSignalListener("SIGINT" as Deno.Signal, shutdown);
+    Deno.addSignalListener("SIGTERM" as Deno.Signal, shutdown);
 
     globalThis.addEventListener("unhandledrejection", (event) => {
       const errorLogger = createLogger(`${this.config.kernelType}-agent`);
@@ -673,6 +681,25 @@ export class RuntimeAgent {
       );
       shutdown();
     });
+  }
+
+  /**
+   * Clean up signal handlers
+   */
+  private cleanupSignalHandlers(): void {
+    for (const [signal, handler] of this.signalHandlers) {
+      try {
+        Deno.removeSignalListener(signal as Deno.Signal, handler);
+      } catch (error) {
+        // Ignore errors during cleanup
+        const cleanupLogger = createLogger(`${this.config.kernelType}-agent`);
+        cleanupLogger.debug("Error removing signal listener", {
+          signal,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    this.signalHandlers.clear();
   }
 
   /**
