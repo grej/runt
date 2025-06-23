@@ -297,18 +297,9 @@ def format_exception(exc_type, exc_value, exc_traceback):
         # Use IPython's enhanced traceback formatting
         from IPython.core.ultratb import VerboseTB
 
-        # Try different VerboseTB initialization approaches for compatibility
-        try:
-            tb_formatter = VerboseTB(mode="Minimal", color_scheme="Neutral")
-        except TypeError:
-            # Fallback for newer IPython versions that don't support mode parameter
-            try:
-                tb_formatter = VerboseTB(color_scheme="Neutral")
-            except TypeError:
-                # Final fallback with no parameters
-                tb_formatter = VerboseTB()
-
-        formatted_tb = tb_formatter.format_exception(exc_type, exc_value, exc_traceback)
+        # Use the known working VerboseTB initialization for our environment
+        tb_formatter = VerboseTB(color_scheme="Neutral")
+        formatted_tb = tb_formatter.format_exception(exc_value, exc_traceback)
         return "".join(formatted_tb)
     except Exception as format_error:
         # Log formatting errors to structured logs instead of stderr
