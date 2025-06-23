@@ -12,3 +12,8 @@ cov.lcov
 
 # Sometimes created by the python files here
 .ropeproject
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
