@@ -17,7 +17,7 @@ import os
 import sys
 import io
 import json
-import traceback
+
 from IPython.core.interactiveshell import InteractiveShell
 from IPython.core.displayhook import DisplayHook
 from IPython.core.displaypub import DisplayPublisher
@@ -167,24 +167,33 @@ class RichDisplayHook(DisplayHook):
         self.execution_count = 0
 
     def __call__(self, result):
-        """Override call to capture execution results"""
+        """Handle execution results with proper serialization"""
         if result is not None:
-            # Increment execution count
             self.execution_count += 1
 
-            # Format the result using IPython's standard formatting
-            format_dict, md_dict = self.compute_format_data(result)
+            # Format the result using IPython's rich formatting
+            try:
+                format_dict, md_dict = self.compute_format_data(result)
 
-            # Send to JavaScript if we have a callback
-            if self.js_callback and format_dict:
-                serializable_data = self._make_serializable(format_dict)
-                serializable_metadata = self._make_serializable(md_dict or {})
-                self.js_callback(
-                    self.execution_count, serializable_data, serializable_metadata
+                # Make data serializable
+                if self.js_callback and format_dict:
+                    serializable_data = self._make_serializable(format_dict)
+                    serializable_metadata = self._make_serializable(md_dict or {})
+
+                    self.js_callback(
+                        self.execution_count, serializable_data, serializable_metadata
+                    )
+
+            except Exception as e:
+                # Log formatting errors to structured logs instead of stderr
+                print(
+                    f"[DISPLAY_HOOK_ERROR] ErrorWarning: Error formatting result: {e}",
+                    file=sys.stderr,
                 )
-
-            # NOTE: We don't need to call the super because we're passing the result back in the callback
-            # super().__call__(result)
+                # Fallback to simple string representation
+                if self.js_callback:
+                    fallback_data = {"text/plain": str(result)}
+                    self.js_callback(self.execution_count, fallback_data, {})
 
         return result
 
@@ -292,7 +301,29 @@ def setup_rich_formatters():
 # Apply rich formatters
 setup_rich_formatters()
 
-print("🐍 IPython environment ready with rich display support")
+
+def format_exception(exc_type, exc_value, exc_traceback):
+    """Format exceptions with standard Python traceback formatting"""
+    try:
+        import traceback
+
+        # Use standard traceback formatting to preserve exception type information
+        return "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    except Exception as format_error:
+        # Log formatting errors to structured logs instead of stderr
+        print(
+            f"[FORMATTER_ERROR] Failed to format exception: {format_error}", flush=True
+        )
+        # Fallback to basic formatting
+        return f"{exc_type.__name__}: {exc_value}"
+
+
+# Override exception formatting
+sys.excepthook = lambda exc_type, exc_value, exc_traceback: print(
+    format_exception(exc_type, exc_value, exc_traceback), file=sys.stderr
+)
+
+print("IPython environment ready with rich display support")
 
 
 # Set up global callbacks (will be overridden by worker)

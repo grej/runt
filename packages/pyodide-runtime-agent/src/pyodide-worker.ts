@@ -22,7 +22,7 @@ interface StreamBuffer {
   lastUpdate: number;
 }
 
-let streamBuffers = new Map<"stdout" | "stderr", StreamBuffer>();
+const streamBuffers = new Map<"stdout" | "stderr", StreamBuffer>();
 let streamFlushTimer: number | null = null;
 const STREAM_FLUSH_DELAY = 50; // ms
 

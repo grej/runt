@@ -22,7 +22,8 @@ Deno.test("Cache utilities", async (t) => {
   await t.step("getCacheDir returns valid path", () => {
     const cacheDir = getCacheDir();
     assertEquals(typeof cacheDir, "string");
-    assertEquals(cacheDir, "./.runt/pyodide-cache");
+    // Should end with .runt/pyodide-cache regardless of home directory
+    assertEquals(cacheDir.endsWith("/.runt/pyodide-cache"), true);
   });
 
   await t.step("getCacheConfig returns valid config", () => {
