@@ -513,8 +513,5 @@ export class RuntOpenAIClient {
   }
 }
 
-// Export singleton instance - will only configure when first used
-export const openaiClient = new RuntOpenAIClient();
-
 // Export class for testing
 export { RuntOpenAIClient as OpenAIClient };
