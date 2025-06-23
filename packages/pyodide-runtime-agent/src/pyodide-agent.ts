@@ -16,7 +16,7 @@ import {
   schema,
   tables,
 } from "@runt/schema";
-import { openaiClient } from "./openai-client.ts";
+import { OpenAIClient } from "./openai-client.ts";
 import stripAnsi from "npm:strip-ansi";
 
 /**
@@ -67,6 +67,7 @@ export class PyodideRuntimeAgent {
   private logger = createLogger("pyodide-agent");
   public config: ReturnType<typeof createRuntimeConfig>;
   private options: PyodideAgentOptions;
+  private openaiClient: OpenAIClient | null = null;
 
   constructor(args: string[] = Deno.args, options: PyodideAgentOptions = {}) {
     try {
@@ -84,11 +85,16 @@ export class PyodideRuntimeAgent {
       console.error(error instanceof Error ? error.message : String(error));
       console.error("\nExample usage:");
       console.error(
-        "  deno run --allow-all --env-file=.env pyodide-agent.ts --notebook my-notebook --auth-token your-token",
+        '  deno run --allow-all "jsr:@runt/pyodide-runtime-agent" --notebook my-notebook --auth-token your-token',
       );
       console.error("\nOr set environment variables in .env:");
       console.error("  NOTEBOOK_ID=my-notebook");
       console.error("  AUTH_TOKEN=your-token");
+      console.error("\nOr install globally:");
+      console.error(
+        "  deno install -gf --allow-all jsr:@runt/pyodide-runtime-agent",
+      );
+      console.error("  pyrunt --notebook my-notebook --auth-token your-token");
       Deno.exit(1);
     }
 
@@ -508,11 +514,16 @@ export class PyodideRuntimeAgent {
       });
 
       // Use real OpenAI API if configured, otherwise fall back to mock
+      // Initialize OpenAI client on demand for AI cells only
+      if (!this.openaiClient) {
+        this.openaiClient = new OpenAIClient();
+      }
+
       if (
-        openaiClient.isReady() &&
+        this.openaiClient.isReady() &&
         (cell.aiProvider === "openai" || !cell.aiProvider)
       ) {
-        const outputs = await openaiClient.generateResponse(prompt, {
+        const outputs = await this.openaiClient.generateResponse(prompt, {
           model: cell.aiModel || "gpt-4o-mini",
           provider: cell.aiProvider || "openai",
           systemPrompt: this.buildSystemPromptWithContext(context_data),
