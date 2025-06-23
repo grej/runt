@@ -83,13 +83,14 @@ const NOTEBOOK_TOOLS: NotebookTool[] = [
   {
     name: "modify_cell",
     description:
-      "Modify the content of an existing cell in the notebook. Use this to fix bugs, improve code, or update content based on user feedback.",
+      "Modify the content of an existing cell in the notebook. Use this to fix bugs, improve code, or update content based on user feedback. Use the actual cell ID from the context (shown as 'ID: cell-xxx'), not position numbers.",
     parameters: {
       type: "object",
       properties: {
         cellId: {
           type: "string",
-          description: "The ID of the cell to modify",
+          description:
+            "The actual cell ID from the context (e.g., 'cell-1234567890-abc'), not a position number",
         },
         content: {
           type: "string",
@@ -102,13 +103,14 @@ const NOTEBOOK_TOOLS: NotebookTool[] = [
   {
     name: "execute_cell",
     description:
-      "Execute a specific cell in the notebook. Use this to run code after creating or modifying it, or to re-run existing cells.",
+      "Execute a specific cell in the notebook. Use this to run code after creating or modifying it, or to re-run existing cells. Use the actual cell ID from the context (shown as 'ID: cell-xxx'), not position numbers.",
     parameters: {
       type: "object",
       properties: {
         cellId: {
           type: "string",
-          description: "The ID of the cell to execute",
+          description:
+            "The actual cell ID from the context (e.g., 'cell-1234567890-abc'), not a position number",
         },
       },
       required: ["cellId"],

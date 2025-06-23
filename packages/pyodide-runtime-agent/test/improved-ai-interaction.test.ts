@@ -91,10 +91,16 @@ Deno.test("Improved AI Interaction - Conversation-based Context", async (t) => {
       // Check context message
       assertExists(messages[1]);
       assertEquals(messages[1].role, "user");
-      assertEquals(messages[1].content.includes("Code cell 1:"), true);
+      assertEquals(
+        messages[1].content.includes("Code cell 1 (ID: cell-1):"),
+        true,
+      );
       assertEquals(messages[1].content.includes("pandas"), true);
       assertEquals(messages[1].content.includes("DataFrame"), true);
-      assertEquals(messages[1].content.includes("Previous AI response:"), true);
+      assertEquals(
+        messages[1].content.includes("Previous AI response (ID: cell-3):"),
+        true,
+      );
 
       // Check user prompt
       assertExists(messages[2]);
@@ -186,10 +192,19 @@ Deno.test("Improved AI Interaction - Conversation-based Context", async (t) => {
 
     assertExists(messages[1]);
     const contextContent = messages[1].content;
-    assertEquals(contextContent.includes("**Markdown:**"), true);
+    assertEquals(
+      contextContent.includes("**Markdown (ID: markdown-cell):**"),
+      true,
+    );
     assertEquals(contextContent.includes("Data Analysis"), true);
-    assertEquals(contextContent.includes("**Code cell"), true);
-    assertEquals(contextContent.includes("**Previous AI response:**"), true);
+    assertEquals(
+      contextContent.includes("**Code cell 2 (ID: code-cell):**"),
+      true,
+    );
+    assertEquals(
+      contextContent.includes("**Previous AI response (ID: ai-cell):**"),
+      true,
+    );
   });
 
   await t.step("buildConversationMessages - empty context", () => {

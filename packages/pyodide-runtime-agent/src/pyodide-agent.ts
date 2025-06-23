@@ -819,6 +819,7 @@ ${output.data["text/markdown"]}
 - Help debug based on actual errors you can see
 - Suggest next steps based on notebook progression
 - Use "after_current" positioning by default
+- When using modify_cell or execute_cell tools, use the actual cell ID (shown as "ID: cell-xxx") not position numbers
 
 Remember: Users want working code in their notebook, not explanations about code.`,
     });
@@ -832,7 +833,7 @@ Remember: Users want working code in their notebook, not explanations about code
         if (cell.cellType === "code") {
           contextMessage += `**Code cell ${
             index + 1
-          }:**\n\`\`\`python\n${cell.source}\n\`\`\`\n`;
+          } (ID: ${cell.id}):**\n\`\`\`python\n${cell.source}\n\`\`\`\n`;
 
           // Add outputs in a natural way
           if (cell.outputs && cell.outputs.length > 0) {
@@ -866,9 +867,11 @@ Remember: Users want working code in their notebook, not explanations about code
           contextMessage += `\n`;
         } else if (cell.cellType === "ai") {
           // Show previous AI interactions as assistant messages
-          contextMessage += `**Previous AI response:**\n${cell.source}\n\n`;
+          contextMessage +=
+            `**Previous AI response (ID: ${cell.id}):**\n${cell.source}\n\n`;
         } else if (cell.cellType === "markdown") {
-          contextMessage += `**Markdown:**\n${cell.source}\n\n`;
+          contextMessage +=
+            `**Markdown (ID: ${cell.id}):**\n${cell.source}\n\n`;
         }
       });
 
