@@ -523,20 +523,28 @@ export class PyodideRuntimeAgent {
         this.openaiClient.isReady() &&
         (cell.aiProvider === "openai" || !cell.aiProvider)
       ) {
-        const outputs = await this.openaiClient.generateResponse(prompt, {
-          model: cell.aiModel || "gpt-4o-mini",
-          provider: cell.aiProvider || "openai",
-          systemPrompt: this.buildSystemPromptWithContext(context_data),
-          enableTools: true,
-          currentCellId: cell.id,
-          onToolCall: async (toolCall) => {
-            this.logger.info("AI requested tool call", {
-              toolName: toolCall.name,
-              cellId: cell.id,
-            });
-            await this.handleToolCall(cell, toolCall);
+        // Use conversation-based approach for better AI interaction
+        const conversationMessages = this.buildConversationMessages(
+          context_data,
+          prompt,
+        );
+
+        const outputs = await this.openaiClient.generateResponseWithMessages(
+          conversationMessages,
+          {
+            model: cell.aiModel || "gpt-4o-mini",
+            provider: cell.aiProvider || "openai",
+            enableTools: true,
+            currentCellId: cell.id,
+            onToolCall: async (toolCall) => {
+              this.logger.info("AI requested tool call", {
+                toolName: toolCall.name,
+                cellId: cell.id,
+              });
+              await this.handleToolCall(cell, toolCall);
+            },
           },
-        });
+        );
 
         this.logger.info("Generated AI outputs", { count: outputs.length });
 
@@ -686,7 +694,8 @@ export class PyodideRuntimeAgent {
   }
 
   /**
-   * Build system prompt with notebook context
+   * Build system prompt with notebook context (legacy method)
+   * @deprecated Use buildConversationMessages for better AI interaction
    */
   public buildSystemPromptWithContext(context: NotebookContextData): string {
     let systemPrompt =
@@ -777,9 +786,114 @@ ${output.data["text/markdown"]}
   }
 
   /**
+   * Convert notebook context to conversation messages for more natural AI interaction
+   */
+  public buildConversationMessages(
+    context: NotebookContextData,
+    userPrompt: string,
+  ): Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }> {
+    const messages = [];
+
+    // Clean, focused system prompt
+    messages.push({
+      role: "system" as const,
+      content:
+        `You are a helpful AI assistant in a Jupyter-like notebook environment. You can see the context of previous cells and their outputs.
+
+**Your primary functions:**
+
+1. **Create cells immediately** - When users want code, examples, or implementations, use the create_cell tool to add them to the notebook. Don't provide code blocks in markdown - create actual executable cells.
+
+2. **Context awareness** - Reference previous cells and their outputs to provide relevant assistance. You can see what variables exist, what functions were defined, and what the current state is.
+
+3. **Debug and optimize** - Help users debug errors, optimize code, or extend existing functionality based on what you can see in the notebook.
+
+4. **Interpret outputs** - Respond based on execution results, error messages, plots, and data outputs from previous cells.
+
+**Key behaviors:**
+- CREATE cells instead of describing code
+- Reference previous work when relevant
+- Help debug based on actual errors you can see
+- Suggest next steps based on notebook progression
+- Use "after_current" positioning by default
+- When using modify_cell or execute_cell tools, use the actual cell ID (shown as "ID: cell-xxx") not position numbers
+
+Remember: Users want working code in their notebook, not explanations about code.`,
+    });
+
+    // Convert notebook history to conversation messages
+    if (context.previousCells.length > 0) {
+      // Add notebook context as a structured user message
+      let contextMessage = `Here's the current state of my notebook:\n\n`;
+
+      context.previousCells.forEach((cell, index) => {
+        if (cell.cellType === "code") {
+          contextMessage += `**Code cell ${
+            index + 1
+          } (ID: ${cell.id}):**\n\`\`\`python\n${cell.source}\n\`\`\`\n`;
+
+          // Add outputs in a natural way
+          if (cell.outputs && cell.outputs.length > 0) {
+            contextMessage += `Output:\n`;
+            cell.outputs.forEach((output) => {
+              if (output.outputType === "stream" && output.data.text) {
+                contextMessage += `\`\`\`\n${
+                  this.stripAnsi(String(output.data.text))
+                }\`\`\`\n`;
+              } else if (
+                output.outputType === "error" && output.data.ename &&
+                output.data.evalue
+              ) {
+                contextMessage += `\`\`\`\nError: ${
+                  this.stripAnsi(String(output.data.ename))
+                }: ${this.stripAnsi(String(output.data.evalue))}\n\`\`\`\n`;
+              } else if (
+                (output.outputType === "execute_result" ||
+                  output.outputType === "display_data") &&
+                output.data["text/plain"]
+              ) {
+                contextMessage += `\`\`\`\n${
+                  this.stripAnsi(String(output.data["text/plain"]))
+                }\n\`\`\`\n`;
+              }
+              if (output.data["text/markdown"]) {
+                contextMessage += `${output.data["text/markdown"]}\n`;
+              }
+            });
+          }
+          contextMessage += `\n`;
+        } else if (cell.cellType === "ai") {
+          // Show previous AI interactions as assistant messages
+          contextMessage +=
+            `**Previous AI response (ID: ${cell.id}):**\n${cell.source}\n\n`;
+        } else if (cell.cellType === "markdown") {
+          contextMessage +=
+            `**Markdown (ID: ${cell.id}):**\n${cell.source}\n\n`;
+        }
+      });
+
+      messages.push({
+        role: "user" as const,
+        content: contextMessage,
+      });
+    }
+
+    // Add the current user prompt
+    messages.push({
+      role: "user" as const,
+      content: userPrompt,
+    });
+
+    return messages;
+  }
+
+  /**
    * Handle tool calls from AI
    */
-  private handleToolCall(currentCell: CellData, toolCall: {
+  public handleToolCall(currentCell: CellData, toolCall: {
     id: string;
     name: string;
     arguments: Record<string, unknown>;
@@ -834,6 +948,91 @@ ${output.data["text/markdown"]}
           cellId: newCellId,
           contentPreview: content.slice(0, 100),
         });
+        break;
+      }
+
+      case "modify_cell": {
+        const cellId = String(args.cellId || "");
+        const content = String(args.content || "");
+
+        if (!cellId) {
+          this.logger.error("modify_cell: cellId is required");
+          return;
+        }
+
+        // Check if cell exists
+        const existingCell = this.store.query(
+          tables.cells.select().where({ id: cellId }),
+        )[0];
+
+        if (!existingCell) {
+          this.logger.error("modify_cell: Cell not found", { cellId });
+          return;
+        }
+
+        this.logger.info("Modifying cell via AI tool call", {
+          cellId,
+          contentLength: content.length,
+        });
+
+        // Update the cell source
+        this.store.commit(
+          events.cellSourceChanged({
+            id: cellId,
+            source: content,
+            modifiedBy: `ai-assistant-${this.config.sessionId}`,
+          }),
+        );
+
+        this.logger.info("Modified cell successfully", {
+          cellId,
+          contentPreview: content.slice(0, 100),
+        });
+        break;
+      }
+
+      case "execute_cell": {
+        const cellId = String(args.cellId || "");
+
+        if (!cellId) {
+          this.logger.error("execute_cell: cellId is required");
+          return;
+        }
+
+        // Check if cell exists and is executable
+        const existingCell = this.store.query(
+          tables.cells.select().where({ id: cellId }),
+        )[0];
+
+        if (!existingCell) {
+          this.logger.error("execute_cell: Cell not found", { cellId });
+          return;
+        }
+
+        if (existingCell.cellType !== "code") {
+          this.logger.error("execute_cell: Only code cells can be executed", {
+            cellId,
+            cellType: existingCell.cellType,
+          });
+          return;
+        }
+
+        this.logger.info("Executing cell via AI tool call", { cellId });
+
+        // Request execution for the cell
+        this.store.commit(
+          events.executionRequested({
+            queueId: `exec-${Date.now()}-${
+              Math.random().toString(36).slice(2)
+            }`,
+            cellId,
+            executionCount: (existingCell.executionCount || 0) + 1,
+            requestedBy: `ai-assistant-${this.config.sessionId}`,
+            priority: 1,
+          }),
+        );
+
+        this.logger.info("Requested execution for cell", { cellId });
         break;
       }
 
