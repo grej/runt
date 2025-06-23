@@ -9,9 +9,10 @@ Runt is a TypeScript/Deno library for building runtime agents that connect to
 Anode notebooks. It uses LiveStore for event-sourcing and real-time sync between
 multiple users.
 
-**Current Status**: Working system with 72 passing tests. Core functionality is
-implemented. Main areas needing work are better error handling and more robust
-connection management.
+**Current Status**: Working system with 29 passing tests. Core functionality is
+implemented and published to JSR. The system is a working prototype with Python
+execution via Pyodide, real-time collaboration, and executable installation
+support.
 
 ## Architecture
 
@@ -38,14 +39,14 @@ connection management.
 - Direct Python code execution with IPython rich formatting
 - HTML rendering, pandas tables, matplotlib SVG plots
 - Real-time interrupt support via SharedArrayBuffer
-- JSR publishing for all packages
+- JSR publishing for all packages with executable installation
+- Global executable installation as `pyrunt`
 
 ## What Needs Work
 
-- Error handling is basic
-- Test coverage is good but could expand edge cases
-- LiveStore complex types require `--allow-slow-types` for publishing
 - Pyodide package loading can be slow on first run
+- Available Python packages are constrained by Pyodide ecosystem
+- Publishing requires `--allow-slow-types` flag due to LiveStore's complex types
 
 ## Development Workflow
 
@@ -59,10 +60,12 @@ deno task dev       # run example echo agent
 
 When making changes:
 
-1. Edit code
-2. Run `deno task ci` to check everything
-3. Commit changes
-4. GitHub Actions runs the same checks
+1. **Always create a branch first** - never commit directly to `main`
+2. Edit code
+3. Run `deno task ci` to check everything
+4. Commit changes with focused, descriptive messages
+5. Push branch and create PR
+6. GitHub Actions runs the same checks
 
 ## Key Constraints
 
@@ -123,7 +126,7 @@ don't return data from the execution handler.
 
 Run tests with: `deno test --allow-env --allow-net --allow-read`
 
-Current test count: 72 passing, 0 failing
+Current test count: 29 passing, 0 failing
 
 ## Dependencies
 
@@ -144,36 +147,44 @@ All dependencies are pinned in `deno.json` import maps.
 - It's okay to say "this is a prototype" or "this part needs work"
 - Code examples are better than long explanations
 - Keep documentation concise and consolidate when possible
+- Remove marketing fluff and focus on technical accuracy
+- Don't claim things "need work" without specific evidence
+- Position this as a working prototype, not a production system
 
 ## Development Guidelines
 
+- **Always work on a branch** - never commit directly to `main`
 - Follow existing code patterns
 - Write tests for new functionality
 - Update documentation when adding features
 - Use TypeScript strictly - fix all type errors
 - Follow Deno formatting conventions (`deno fmt`)
 - Keep commits focused and descriptive
+- Squash related commits before merging to keep history clean
 
 ## For AI Assistants
 
 When working on this codebase:
 
+- **Create a branch first** - never work directly on `main`
 - Read the existing code to understand patterns
 - Run tests after making changes
 - Check that CI passes before submitting
 - Don't make assumptions about complex LiveStore behavior
 - Ask for clarification if event-sourcing concepts are unclear
 - Focus on making the code work reliably rather than adding features
+- Be honest about limitations and current state
+- Avoid marketing language - this is a prototype for developers
 
 The goal is to make this library useful for developers building runtime agents,
 not to impress anyone with complexity.
 
-## Recent Fixes Applied
+## Recent Changes
 
-- Fixed Pyodide code execution by using direct execution instead of IPython
-  transforms
-- Eliminated duplicate execute_result outputs by proper displayhook handling
-- Added proper JSR publishing configuration for all packages
-- Consolidated documentation to reduce redundancy
-- Upgraded Pyodide to version 0.27.7
-- Moved dependency version constraints to deno.json imports
+- Published all packages to JSR with proper dependency management
+- Restructured pyodide package for executable installation (`pyrunt`)
+- Cleaned up test suite from 47 to 29 focused test cases
+- Removed marketing fluff from documentation
+- Fixed JSR publishing with proper import constraints
+- Added executable bin configuration for global installation
+- Consolidated redundant documentation and tests
