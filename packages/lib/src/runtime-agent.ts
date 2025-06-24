@@ -441,7 +441,7 @@ export class RuntimeAgent {
 
       // Output emission methods for real-time streaming
       stdout: (text: string) => {
-        if (text.trim()) {
+        if (text) {
           this.store.commit(events.cellOutputAdded({
             id: crypto.randomUUID(),
             cellId: cell.id,
@@ -457,7 +457,7 @@ export class RuntimeAgent {
       },
 
       stderr: (text: string) => {
-        if (text.trim()) {
+        if (text) {
           this.store.commit(events.cellOutputAdded({
             id: crypto.randomUUID(),
             cellId: cell.id,

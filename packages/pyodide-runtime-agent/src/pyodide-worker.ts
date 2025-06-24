@@ -15,17 +15,6 @@ declare const self: DedicatedWorkerGlobalScope;
 let pyodide: PyodideInterface | null = null;
 let interruptBuffer: SharedArrayBuffer | null = null;
 
-// Stream output coalescing
-interface StreamBuffer {
-  type: "stdout" | "stderr";
-  text: string;
-  lastUpdate: number;
-}
-
-const streamBuffers = new Map<"stdout" | "stderr", StreamBuffer>();
-let streamFlushTimer: number | null = null;
-const STREAM_FLUSH_DELAY = 50; // ms
-
 // Handle messages from main thread
 self.addEventListener("message", async (event) => {
   const { id, type, data } = (event as MessageEvent).data;
@@ -43,8 +32,6 @@ self.addEventListener("message", async (event) => {
 
       case "execute": {
         const result = await executePython(data.code);
-        // Flush any remaining stream buffers before responding
-        flushStreamBuffers();
         self.postMessage({ id, type: "response", data: result });
         break;
       }
@@ -138,76 +125,48 @@ async function initializePyodide(
   // Load our Python bootstrap file
   await setupIPythonEnvironment();
 
-  // Switch to clean stdout/stderr handlers after startup
+  // Switch to raw write handler for stdout to capture all bytes
   pyodide.setStdout({
-    batched: (text: string) => {
-      addToStreamBuffer("stdout", text);
+    write: (buffer: Uint8Array) => {
+      // Convert buffer to text
+      const text = new TextDecoder().decode(buffer);
+
+      // Send stdout immediately without coalescing to preserve newlines
+      if (text) {
+        self.postMessage({
+          type: "stream_output",
+          data: { type: "stdout", text },
+        });
+      }
+
+      // Return number of bytes processed
+      return buffer.length;
     },
+    isatty: true,
   });
 
   pyodide.setStderr({
-    batched: (text: string) => {
-      addToStreamBuffer("stderr", text);
+    write: (buffer: Uint8Array) => {
+      // Convert buffer to text
+      const text = new TextDecoder().decode(buffer);
+
+      // Send stderr immediately without coalescing to be consistent with stdout
+      if (text) {
+        self.postMessage({
+          type: "stream_output",
+          data: { type: "stderr", text },
+        });
+      }
+
+      return buffer.length;
     },
+    isatty: true,
   });
 
   self.postMessage({
     type: "log",
     data: "Enhanced Pyodide worker initialized successfully",
   });
-}
-
-/**
- * Add text to stream buffer with coalescing
- */
-function addToStreamBuffer(type: "stdout" | "stderr", text: string): void {
-  if (!text.trim()) return;
-
-  const now = Date.now();
-  const existing = streamBuffers.get(type);
-
-  if (existing && (now - existing.lastUpdate) < STREAM_FLUSH_DELAY) {
-    // Coalesce with existing buffer
-    existing.text += text;
-    existing.lastUpdate = now;
-  } else {
-    // Create new buffer or replace old one
-    streamBuffers.set(type, {
-      type,
-      text: existing ? existing.text + text : text,
-      lastUpdate: now,
-    });
-  }
-
-  // Schedule flush
-  if (streamFlushTimer) {
-    clearTimeout(streamFlushTimer);
-  }
-  streamFlushTimer = setTimeout(
-    flushStreamBuffers,
-    STREAM_FLUSH_DELAY,
-  ) as unknown as number;
-}
-
-/**
- * Flush all stream buffers
- */
-function flushStreamBuffers(): void {
-  if (streamFlushTimer) {
-    clearTimeout(streamFlushTimer);
-    streamFlushTimer = null;
-  }
-
-  for (const [type, buffer] of streamBuffers.entries()) {
-    if (buffer.text.trim()) {
-      self.postMessage({
-        type: "stream_output",
-        data: { type, text: buffer.text },
-      });
-    }
-  }
-
-  streamBuffers.clear();
 }
 
 /**

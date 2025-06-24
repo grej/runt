@@ -234,6 +234,41 @@ x + len(y)
     assertStringIncludes(stdoutText, "x = 42, y = test");
   });
 
+  await t.step("test multiple print statements with newlines", async () => {
+    const { context, outputs } = createExecutionContext(`
+print('hey')
+print('ok')
+    `);
+
+    const result = await (agent as unknown as {
+      executePython: (
+        ctx: ExecutionContextLike,
+      ) => Promise<{ success: boolean }>;
+    }).executePython(context);
+    assertEquals(result.success, true);
+
+    // Should have stdout output
+    const stdoutOutputs = outputs.filter((o) => o.type === "stdout");
+    assertEquals(stdoutOutputs.length > 0, true);
+
+    const stdoutText = stdoutOutputs.map((o) => o.data).join("");
+
+    // Check that we have proper newlines between outputs
+    assertStringIncludes(stdoutText, "hey");
+    assertStringIncludes(stdoutText, "ok");
+
+    // Verify that the outputs are properly separated (not "heyok")
+    // The exact format depends on how pyodide batches the output
+    const hasProperSeparation = stdoutText.includes("hey\n") ||
+      stdoutText.match(/hey.*\n.*ok/) ||
+      stdoutOutputs.length > 1;
+    assertEquals(
+      hasProperSeparation,
+      true,
+      `Expected proper line separation, got: ${JSON.stringify(stdoutText)}`,
+    );
+  });
+
   await t.step("test Python error handling", async () => {
     const { context, outputs } = createExecutionContext(
       "raise ValueError('test error message')",

@@ -111,7 +111,7 @@ Deno.test("ExecutionContext Output Methods", async (t) => {
         },
 
         stdout: (text: string) => {
-          if (text.trim()) {
+          if (text) {
             mockStore.commit({
               type: "cellOutputAdded",
               id: crypto.randomUUID(),
@@ -125,7 +125,7 @@ Deno.test("ExecutionContext Output Methods", async (t) => {
         },
 
         stderr: (text: string) => {
-          if (text.trim()) {
+          if (text) {
             mockStore.commit({
               type: "cellOutputAdded",
               id: crypto.randomUUID(),
@@ -213,10 +213,21 @@ Deno.test("ExecutionContext Output Methods", async (t) => {
       const context = createTestContext();
 
       context.stdout("");
+
+      assertEquals(mockStore.commits.length, 0);
+    });
+
+    await t.step("should preserve whitespace and newlines", () => {
+      const context = createTestContext();
+
       context.stdout("   ");
       context.stdout("\n\n");
 
-      assertEquals(mockStore.commits.length, 0);
+      assertEquals(mockStore.commits.length, 2);
+      const commit1 = mockStore.commits[0] as MockOutputCommit;
+      const commit2 = mockStore.commits[1] as MockOutputCommit;
+      assertEquals(commit1.data.text, "   ");
+      assertEquals(commit2.data.text, "\n\n");
     });
 
     setup();
@@ -265,9 +276,18 @@ Deno.test("ExecutionContext Output Methods", async (t) => {
       const context = createTestContext();
 
       context.stderr("");
-      context.stderr("   ");
 
       assertEquals(mockStore.commits.length, 0);
+    });
+
+    await t.step("should preserve whitespace for stderr", () => {
+      const context = createTestContext();
+
+      context.stderr("   ");
+
+      assertEquals(mockStore.commits.length, 1);
+      const commit = mockStore.commits[0] as MockOutputCommit;
+      assertEquals(commit.data.text, "   ");
     });
   });
 
