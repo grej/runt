@@ -1022,7 +1022,7 @@
       "packages/pyodide-runtime-agent": {
         "dependencies": [
           "jsr:@openai/openai@^4.98.0",
-          "jsr:@runt/lib@0.2",
+          "jsr:@runt/lib@~0.2.1",
           "jsr:@runt/schema@0.2",
           "jsr:@std/async@1",
           "npm:@livestore/livestore@~0.3.1",
