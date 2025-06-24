@@ -33,6 +33,7 @@ plt.rcParams["figure.facecolor"] = "white"
 plt.rcParams["savefig.facecolor"] = "white"
 plt.rcParams["figure.figsize"] = (8, 6)
 
+# Set up environment for rich terminal output
 os.environ.update(
     {
         "TERM": "xterm-256color",
@@ -42,46 +43,6 @@ os.environ.update(
         "CLICOLOR_FORCE": "1",
     }
 )
-
-
-# Enhanced terminal support for rich colors
-class ColorfulStdout:
-    def __init__(self, original):
-        self._original = original
-
-    def __getattr__(self, name):
-        return getattr(self._original, name)
-
-    def isatty(self):
-        return True
-
-    def write(self, text):
-        return self._original.write(text)
-
-    def flush(self):
-        return self._original.flush()
-
-
-class ColorfulStderr:
-    def __init__(self, original):
-        self._original = original
-
-    def __getattr__(self, name):
-        return getattr(self._original, name)
-
-    def isatty(self):
-        return True
-
-    def write(self, text):
-        return self._original.write(text)
-
-    def flush(self):
-        return self._original.flush()
-
-
-# Replace stdout and stderr with colorful versions
-sys.stdout = ColorfulStdout(sys.stdout)
-sys.stderr = ColorfulStderr(sys.stderr)
 
 
 class LiteHistoryManager(HistoryManager):

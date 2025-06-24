@@ -139,7 +139,6 @@ async function initializePyodide(
         });
       }
 
-      // Return number of bytes processed
       return buffer.length;
     },
     isatty: true,
