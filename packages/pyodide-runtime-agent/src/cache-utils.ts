@@ -5,13 +5,23 @@
  * like numpy and pandas ready to go. But loading 20+ packages takes time.
  *
  * This module organizes packages into groups for smart loading:
+ * - Bootstrap: Minimal packages needed for IPython setup (micropip, ipython)
  * - Essential: Always loaded (numpy, pandas, matplotlib, etc.)
  * - Preload: Core packages loaded first for fast startup
  * - On-demand: Useful packages loaded as needed
  *
  * The cache directory stores downloaded packages locally so subsequent
- * notebook sessions start faster.
+ * notebook sessions start faster. First-run detection optimizes the initial
+ * loading strategy.
  */
+
+/**
+ * Bootstrap packages - minimal set needed for IPython setup
+ * These are loaded via loadPyodide's packages option for maximum efficiency
+ */
+export function getBootstrapPackages(): string[] {
+  return ["micropip", "ipython", "matplotlib"];
+}
 
 /**
  * Essential packages loaded by default in every Python runtime
@@ -62,6 +72,28 @@ export function getCacheConfig(): { packageCacheDir: string } {
   return {
     packageCacheDir: getCacheDir(),
   };
+}
+
+/**
+ * Detect if this is a first run by checking cache directory
+ */
+export function isFirstRun(): boolean {
+  try {
+    const cacheDir = getCacheDir();
+    const stat = Deno.statSync(cacheDir);
+    if (!stat.isDirectory) return true;
+
+    // Check if cache has any .whl files (Pyodide package format)
+    for (const entry of Deno.readDirSync(cacheDir)) {
+      if (entry.name.endsWith(".whl")) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    // Cache directory doesn't exist or can't be read
+    return true;
+  }
 }
 
 /**
