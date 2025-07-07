@@ -7,6 +7,24 @@ import {
   type Store as LiveStore,
 } from "@livestore/livestore";
 
+// Media representation schema for unified output system - defined first for use in events
+const MediaRepresentationSchema = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("inline"),
+    data: Schema.Any,
+    metadata: Schema.optional(
+      Schema.Record({ key: Schema.String, value: Schema.Any }),
+    ),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("artifact"),
+    artifactId: Schema.String,
+    metadata: Schema.optional(
+      Schema.Record({ key: Schema.String, value: Schema.Any }),
+    ),
+  }),
+);
+
 export const tables = {
   // Notebook metadata (single row per store)
   notebook: State.SQLite.table({
@@ -70,16 +88,40 @@ export const tables = {
       cellId: State.SQLite.text(),
       outputType: State.SQLite.text({
         schema: Schema.Literal(
-          "display_data",
-          "execute_result",
-          "stream",
+          "multimedia_display",
+          "multimedia_result",
+          "terminal",
+          "markdown",
           "error",
         ),
       }),
-      data: State.SQLite.json({ schema: Schema.Any }),
-      metadata: State.SQLite.json({ nullable: true, schema: Schema.Any }), // For additional output metadata
       position: State.SQLite.real(),
-      displayId: State.SQLite.text({ nullable: true }), // Jupyter display_id for cross-cell updates
+
+      // Type-specific fields
+      streamName: State.SQLite.text({ nullable: true }), // 'stdout', 'stderr' for terminal outputs
+      executionCount: State.SQLite.integer({ nullable: true }), // Only for multimedia_result
+      displayId: State.SQLite.text({ nullable: true }), // Only for multimedia_display
+
+      // Flattened content for SQL operations
+      data: State.SQLite.text({ nullable: true }), // Primary/concatenated content (text)
+      artifactId: State.SQLite.text({ nullable: true }), // Primary artifact reference
+      mimeType: State.SQLite.text({ nullable: true }), // Primary mime type
+      metadata: State.SQLite.json({ nullable: true, schema: Schema.Any }), // Primary metadata
+
+      // Multi-media support
+      representations: State.SQLite.json({
+        nullable: true,
+        schema: Schema.Any,
+      }), // Full representation map for multimedia outputs
+    },
+  }),
+
+  // Pending clears table for clear_output(wait=True) support
+  pendingClears: State.SQLite.table({
+    name: "pendingClears",
+    columns: {
+      cellId: State.SQLite.text({ primaryKey: true }),
+      clearedBy: State.SQLite.text(),
     },
   }),
 
@@ -347,31 +389,79 @@ export const events = {
     }),
   }),
 
-  // Output events
-  cellOutputAdded: Events.synced({
-    name: "v1.CellOutputAdded",
+  // Unified output system - granular events replacing cellOutputAdded
+  multimediaDisplayOutputAdded: Events.synced({
+    name: "v1.MultimediaDisplayOutputAdded",
     schema: Schema.Struct({
       id: Schema.String,
       cellId: Schema.String,
-      outputType: Schema.Literal(
-        "display_data",
-        "execute_result",
-        "stream",
-        "error",
-      ),
-      data: Schema.Any,
-      metadata: Schema.optional(Schema.Any), // For additional output metadata
       position: Schema.Number,
-      displayId: Schema.optional(Schema.String), // Jupyter display_id for cross-cell updates
+      representations: Schema.Record({
+        key: Schema.String,
+        value: MediaRepresentationSchema,
+      }),
+      displayId: Schema.optional(Schema.String),
     }),
   }),
 
-  cellOutputUpdated: Events.synced({
-    name: "v1.CellOutputUpdated",
+  multimediaResultOutputAdded: Events.synced({
+    name: "v1.MultimediaResultOutputAdded",
     schema: Schema.Struct({
-      id: Schema.String, // Display ID to update (global across cells)
-      data: Schema.Any,
-      metadata: Schema.optional(Schema.Any),
+      id: Schema.String,
+      cellId: Schema.String,
+      position: Schema.Number,
+      representations: Schema.Record({
+        key: Schema.String,
+        value: MediaRepresentationSchema,
+      }),
+      executionCount: Schema.Number,
+    }),
+  }),
+
+  terminalOutputAdded: Events.synced({
+    name: "v1.TerminalOutputAdded",
+    schema: Schema.Struct({
+      id: Schema.String,
+      cellId: Schema.String,
+      position: Schema.Number,
+      content: MediaRepresentationSchema,
+      streamName: Schema.Literal("stdout", "stderr"),
+    }),
+  }),
+
+  terminalOutputAppended: Events.synced({
+    name: "v1.TerminalOutputAppended",
+    schema: Schema.Struct({
+      outputId: Schema.String,
+      content: MediaRepresentationSchema,
+    }),
+  }),
+
+  markdownOutputAdded: Events.synced({
+    name: "v1.MarkdownOutputAdded",
+    schema: Schema.Struct({
+      id: Schema.String,
+      cellId: Schema.String,
+      position: Schema.Number,
+      content: MediaRepresentationSchema,
+    }),
+  }),
+
+  markdownOutputAppended: Events.synced({
+    name: "v1.MarkdownOutputAppended",
+    schema: Schema.Struct({
+      outputId: Schema.String,
+      content: MediaRepresentationSchema,
+    }),
+  }),
+
+  errorOutputAdded: Events.synced({
+    name: "v1.ErrorOutputAdded",
+    schema: Schema.Struct({
+      id: Schema.String,
+      cellId: Schema.String,
+      position: Schema.Number,
+      content: MediaRepresentationSchema,
     }),
   }),
 
@@ -379,6 +469,7 @@ export const events = {
     name: "v1.CellOutputsCleared",
     schema: Schema.Struct({
       cellId: Schema.String,
+      wait: Schema.Boolean,
       clearedBy: Schema.String,
     }),
   }),
@@ -588,31 +679,243 @@ const materializers = State.SQLite.materializers(events, {
       .where({ id: cellId }),
   ],
 
-  // Output materializers
-  "v1.CellOutputAdded": ({
-    id,
-    cellId,
-    outputType,
-    data,
-    metadata,
-    position,
-    displayId,
-  }) =>
-    tables.outputs.insert({
-      id,
-      cellId,
-      outputType,
-      data,
-      metadata,
-      position,
-      displayId: displayId || null,
-    }),
+  // Unified output system materializers with pending clear support
+  "v1.MultimediaDisplayOutputAdded": (
+    { id, cellId, position, representations, displayId },
+    ctx,
+  ) => {
+    const ops = [];
+    // Check for pending clears
+    const pendingClear = ctx.query(
+      tables.pendingClears.select().where({ cellId }).limit(1),
+    )[0];
+    if (pendingClear) {
+      ops.push(tables.outputs.delete().where({ cellId }));
+      ops.push(tables.pendingClears.delete().where({ cellId }));
+    }
 
-  "v1.CellOutputUpdated": ({ id, data, metadata }) =>
-    tables.outputs.update({ data, metadata }).where({ displayId: id }),
+    // Choose primary representation
+    const preferenceOrder = [
+      "text/html",
+      "image/png",
+      "image/jpeg",
+      "image/svg+xml",
+      "application/json",
+      "text/plain",
+    ];
+    let primaryData = "";
+    let primaryMimeType = "text/plain";
 
-  "v1.CellOutputsCleared": ({ cellId }) =>
-    tables.outputs.delete().where({ cellId }),
+    for (const mimeType of preferenceOrder) {
+      if (representations[mimeType]) {
+        const rep = representations[mimeType];
+        primaryData = rep.type === "inline" ? String(rep.data || "") : "";
+        primaryMimeType = mimeType;
+        break;
+      }
+    }
+
+    ops.push(
+      tables.outputs.insert({
+        id,
+        cellId,
+        outputType: "multimedia_display",
+        position,
+        displayId: displayId || null,
+        data: primaryData,
+        artifactId: null,
+        mimeType: primaryMimeType,
+        metadata: null,
+        representations,
+      }),
+    );
+    return ops;
+  },
+
+  "v1.MultimediaResultOutputAdded": (
+    { id, cellId, position, representations, executionCount },
+    ctx,
+  ) => {
+    const ops = [];
+    // Check for pending clears
+    const pendingClear = ctx.query(
+      tables.pendingClears.select().where({ cellId }).limit(1),
+    )[0];
+    if (pendingClear) {
+      ops.push(tables.outputs.delete().where({ cellId }));
+      ops.push(tables.pendingClears.delete().where({ cellId }));
+    }
+
+    // Choose primary representation
+    const preferenceOrder = [
+      "text/html",
+      "image/png",
+      "image/jpeg",
+      "image/svg+xml",
+      "application/json",
+      "text/plain",
+    ];
+    let primaryData = "";
+    let primaryMimeType = "text/plain";
+
+    for (const mimeType of preferenceOrder) {
+      if (representations[mimeType]) {
+        const rep = representations[mimeType];
+        primaryData = rep.type === "inline" ? String(rep.data || "") : "";
+        primaryMimeType = mimeType;
+        break;
+      }
+    }
+
+    ops.push(
+      tables.outputs.insert({
+        id,
+        cellId,
+        outputType: "multimedia_result",
+        position,
+        executionCount,
+        data: primaryData,
+        artifactId: null,
+        mimeType: primaryMimeType,
+        metadata: null,
+        representations,
+      }),
+    );
+    return ops;
+  },
+
+  "v1.TerminalOutputAdded": (
+    { id, cellId, position, content, streamName },
+    ctx,
+  ) => {
+    const ops = [];
+    // Check for pending clears
+    const pendingClear = ctx.query(
+      tables.pendingClears.select().where({ cellId }).limit(1),
+    )[0];
+    if (pendingClear) {
+      ops.push(tables.outputs.delete().where({ cellId }));
+      ops.push(tables.pendingClears.delete().where({ cellId }));
+    }
+
+    ops.push(
+      tables.outputs.insert({
+        id,
+        cellId,
+        outputType: "terminal",
+        position,
+        streamName,
+        data: content.type === "inline" ? String(content.data) : null,
+        artifactId: content.type === "artifact" ? content.artifactId : null,
+        mimeType: "text/plain",
+        metadata: content.metadata || null,
+        representations: null,
+      }),
+    );
+    return ops;
+  },
+
+  "v1.TerminalOutputAppended": ({ outputId, content }, ctx) => {
+    const existingOutput = ctx.query(
+      tables.outputs.select().where({ id: outputId }).limit(1),
+    )[0];
+
+    if (!existingOutput) {
+      return [];
+    }
+
+    const newContent = content.type === "inline" ? String(content.data) : "";
+    const concatenatedData = (existingOutput.data || "") + newContent;
+
+    return [
+      tables.outputs
+        .update({ data: concatenatedData })
+        .where({ id: outputId }),
+    ];
+  },
+
+  "v1.MarkdownOutputAdded": ({ id, cellId, position, content }, ctx) => {
+    const ops = [];
+    // Check for pending clears
+    const pendingClear = ctx.query(
+      tables.pendingClears.select().where({ cellId }).limit(1),
+    )[0];
+    if (pendingClear) {
+      ops.push(tables.outputs.delete().where({ cellId }));
+      ops.push(tables.pendingClears.delete().where({ cellId }));
+    }
+
+    ops.push(
+      tables.outputs.insert({
+        id,
+        cellId,
+        outputType: "markdown",
+        position,
+        data: content.type === "inline" ? String(content.data) : null,
+        artifactId: content.type === "artifact" ? content.artifactId : null,
+        mimeType: "text/markdown",
+        metadata: content.metadata || null,
+        representations: null,
+      }),
+    );
+    return ops;
+  },
+
+  "v1.MarkdownOutputAppended": ({ outputId, content }, ctx) => {
+    const existingOutput = ctx.query(
+      tables.outputs.select().where({ id: outputId }).limit(1),
+    )[0];
+
+    if (!existingOutput) {
+      return [];
+    }
+
+    const newContent = content.type === "inline" ? String(content.data) : "";
+    const concatenatedData = (existingOutput.data || "") + newContent;
+
+    return [
+      tables.outputs
+        .update({ data: concatenatedData })
+        .where({ id: outputId }),
+    ];
+  },
+
+  "v1.ErrorOutputAdded": ({ id, cellId, position, content }, ctx) => {
+    const ops = [];
+    // Check for pending clears
+    const pendingClear = ctx.query(
+      tables.pendingClears.select().where({ cellId }).limit(1),
+    )[0];
+    if (pendingClear) {
+      ops.push(tables.outputs.delete().where({ cellId }));
+      ops.push(tables.pendingClears.delete().where({ cellId }));
+    }
+
+    ops.push(
+      tables.outputs.insert({
+        id,
+        cellId,
+        outputType: "error",
+        position,
+        data: content.type === "inline" ? JSON.stringify(content.data) : null,
+        artifactId: content.type === "artifact" ? content.artifactId : null,
+        mimeType: "application/json",
+        metadata: content.metadata || null,
+        representations: null,
+      }),
+    );
+    return ops;
+  },
+
+  "v1.CellOutputsCleared": ({ cellId, wait, clearedBy }) => {
+    if (wait) {
+      // Store pending clear for wait=True
+      return tables.pendingClears.insert({ cellId, clearedBy });
+    } else {
+      // Immediate clear for wait=False
+      return tables.outputs.delete().where({ cellId });
+    }
+  },
 
   // SQL materializers
   "v1.SqlConnectionCreated": ({
@@ -663,6 +966,7 @@ export type Store = LiveStore<typeof schema>;
 export type NotebookData = typeof tables.notebook.Type;
 export type CellData = typeof tables.cells.Type;
 export type OutputData = typeof tables.outputs.Type;
+
 export type KernelSessionData = typeof tables.kernelSessions.Type;
 export type ExecutionQueueData = typeof tables.executionQueue.Type;
 export type DataConnectionData = typeof tables.dataConnections.Type;
@@ -699,6 +1003,17 @@ export type QueueStatus =
 // Output types
 export type OutputType = "display_data" | "execute_result" | "stream" | "error";
 
+// TypeScript type derived from schema
+export type MediaRepresentation = {
+  type: "inline";
+  data: unknown;
+  metadata?: Record<string, unknown>;
+} | {
+  type: "artifact";
+  artifactId: string;
+  metadata?: Record<string, unknown>;
+};
+
 // SQL-specific types
 export interface SqlResultData {
   columns: string[];
@@ -719,10 +1034,11 @@ export interface RichOutputData {
 }
 
 // Error output structure
+// Error output data structure for unified system
 export interface ErrorOutputData {
   ename: string;
   evalue: string;
-  traceback?: string[];
+  traceback: string[];
 }
 
 // Stream output structure

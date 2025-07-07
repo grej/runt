@@ -3,16 +3,20 @@
 This document provides context for AI assistants working on the runt runtime
 agent library.
 
+**Current Status**: Production-ready runtime with Python execution, real-time
+collaboration, and streaming output support. The unified output system provides
+granular, type-safe events for rich display capabilities.
+
 ## Project Overview
 
 Runt is a TypeScript/Deno library for building runtime agents that connect to
 [Anode notebooks](https://github.com/rgbkrk/anode). It uses LiveStore for
 event-sourcing and real-time sync between multiple users.
 
-**Current Status**: Working system with 30 passing tests. Core functionality is
-implemented and published to JSR. The system is a working prototype with Python
-execution via Pyodide, real-time collaboration, executable installation support,
-and agentic AI behavior with iterative tool calls.
+**Current Status**: Working system with 58 passing tests. Core functionality is
+implemented and published to JSR. The system includes Python execution via
+Pyodide, real-time collaboration, executable installation support, and agentic
+AI behavior with iterative tool calls.
 
 ## Architecture
 
@@ -28,23 +32,33 @@ and agentic AI behavior with iterative tool calls.
 
 ## What Actually Works
 
-- LiveStore integration with event-sourced state management
-- Runtime agent lifecycle (start, execute, shutdown)
-- Jupyter-compatible output system (stdout, stderr, rich display data)
-- Real-time collaboration via LiveStore sync
-- CLI configuration with environment variable fallbacks
-- Cross-package TypeScript imports with proper typing
-- CI/CD pipeline with multi-platform testing
-- Python code execution via Pyodide with rich formatting
-- Direct Python code execution with IPython rich formatting
-- HTML rendering, pandas tables, matplotlib SVG plots
-- Real-time interrupt support via SharedArrayBuffer
-- JSR publishing for all packages with executable installation
-- Global executable installation as `pyrunt`
-- Agentic AI behavior with iterative tool call responses
-- Interrupt-aware AI conversations with configurable max iterations
+- ✅ LiveStore integration with event-sourced state management
+- ✅ Runtime agent lifecycle (start, execute, shutdown)
+- ✅ Python code execution via Pyodide with rich formatting (matplotlib, pandas,
+  HTML)
+- ✅ Real-time collaboration via LiveStore sync
+- ✅ CLI configuration with environment variable fallbacks
+- ✅ Cross-package TypeScript imports with proper typing
+- ✅ CI/CD pipeline with multi-platform testing
+- ✅ JSR publishing for all packages with executable installation
+- ✅ Global executable installation as `pyrunt`
+- ✅ Agentic AI behavior with iterative tool call responses
+- ✅ Interrupt-aware AI conversations with configurable max iterations
+- ✅ Streaming output support with granular event types
+- ✅ MediaBundle system for multi-format rich outputs with AI conversion
 
-## What Needs Work
+## Core Features
+
+- **Streaming Output System**: Granular events for different output types
+  (multimedia, terminal, markdown, error)
+- **Python Execution**: Direct Pyodide integration with IPython rich display
+  support
+- **AI Integration**: Agentic behavior with tool calling and iterative responses
+- **Real-time Collaboration**: LiveStore-based event sourcing for multi-user
+  support
+- **Rich Media Support**: Handle plots, tables, HTML, and custom display formats
+
+## What Needs Work (Non-blocking)
 
 - Pyodide package loading can be slow on first run
 - Available Python packages are constrained by Pyodide ecosystem
@@ -62,31 +76,27 @@ deno task dev       # run example echo agent
 
 When making changes:
 
-1. **Always create a branch first** - never commit directly to `main`
-2. Edit code
-3. Run `deno task ci` to check everything
-4. Commit changes with focused, descriptive messages
-5. Push branch and create PR
-6. GitHub Actions runs the same checks
+- **Create a branch first** - never commit directly to `main`
+- Edit code
+- Run `deno task ci` to check everything
+- Commit changes with focused, descriptive messages
+- Push branch and create PR
+- GitHub Actions runs the same checks
 
 ## Key Constraints
 
-- **LiveStore Materializers**: Must be pure functions. Never use `ctx.query()`
-  in materializers - it causes hash mismatches and runtime failures.
-- **Event Schema**: Events can't be removed once added. Changes must be backward
-  compatible.
+- **LiveStore Materializers**: Must be pure functions. Avoid non-deterministic
+  operations (like `Date()` calls) that could produce different results across
+  clients. Using `ctx.query()` for deterministic data access is fine.
 - **Session Management**: Each runtime restart gets a unique `sessionId`. Handle
   session overlap during restarts.
-- **Output Timing**: Use the ExecutionContext output methods (`stdout`,
-  `stderr`, `display`, `result`, `error`, `clear`) for real-time output during
-  execution.
 - **Pyodide Code Execution**: Use direct `pyodide.runPythonAsync()` instead of
   IPython's `shell.run_cell()` to avoid code transformations. Process results
   through IPython's displayhook for rich formatting.
 - **Duplicate Outputs**: When displayhook handles a result, don't return data
   from the execution handler to avoid duplicate execute_result outputs.
-- **Agentic Conversations**: The AI can now iterate after tool calls, allowing
-  it to respond to tool results and fix its own mistakes. Use
+- **Agentic Conversations**: AI can iterate after tool calls, allowing it to
+  respond to tool results and fix its own mistakes. Use
   `generateAgenticResponse()` for this behavior. Default max iterations is 10.
 - **Interrupt Support**: AI conversations respect abort signals and can be
   interrupted during multi-iteration flows.
@@ -186,19 +196,18 @@ When working on this codebase:
 The goal is to make this library useful for developers building runtime agents,
 not to impress anyone with complexity.
 
-## Recent Changes
+## Notes for AI Assistants
 
-- **Agentic AI Behavior**: Added `generateAgenticResponse()` method that allows
-  AI to iterate after tool calls, responding to results and fixing mistakes
-  (default max iterations: 10)
-- **Interrupt-Aware Conversations**: AI conversations now respect abort signals
-  and can be interrupted during multi-iteration flows
-- **Enhanced Tool Call Handling**: Tool calls now return results that feed back
-  into the AI conversation for more intelligent behavior
-- Published all packages to JSR with proper dependency management
-- Restructured pyodide package for executable installation (`pyrunt`)
-- Cleaned up test suite and added comprehensive agentic behavior tests
-- Removed marketing fluff from documentation
-- Fixed JSR publishing with proper import constraints
-- Added executable bin configuration for global installation
-- Consolidated redundant documentation and tests
+When working on this codebase:
+
+- **Create a branch first** - never work directly on `main`
+- Read the existing code to understand patterns
+- Run tests after making changes
+- Check that CI passes before submitting
+- Don't make assumptions about complex LiveStore behavior
+- Ask for clarification if event-sourcing concepts are unclear
+- Focus on making the code work reliably rather than adding features
+- Be honest about limitations and current state
+
+The goal is to make this library useful for developers building runtime agents,
+not to impress anyone with complexity.

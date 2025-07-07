@@ -12,7 +12,6 @@ import { createLogger } from "./logging.ts";
 import type {
   CancellationHandler,
   CellData,
-  ErrorOutputData,
   ExecutionContext,
   ExecutionHandler,
   ExecutionQueueData,
@@ -20,7 +19,6 @@ import type {
   KernelCapabilities,
   RichOutputData,
   RuntimeAgentEventHandlers,
-  StreamOutputData,
 } from "./types.ts";
 import type { RuntimeConfig } from "./config.ts";
 
@@ -487,6 +485,7 @@ export class RuntimeAgent {
     }
 
     // Track output position for proper ordering
+    // State tracking for unified output system
     let outputPosition = 0;
 
     // Create execution context (available in catch block for error handler)
@@ -506,32 +505,43 @@ export class RuntimeAgent {
       // Output emission methods for real-time streaming
       stdout: (text: string) => {
         if (text) {
-          this.store.commit(events.cellOutputAdded({
+          this.store.commit(events.terminalOutputAdded({
             id: crypto.randomUUID(),
             cellId: cell.id,
-            outputType: "stream",
-            data: {
-              name: "stdout",
-              text,
-            } as StreamOutputData,
-            metadata: {},
             position: outputPosition++,
+            content: {
+              type: "inline",
+              data: text,
+            },
+            streamName: "stdout",
+          }));
+        }
+      },
+
+      // Append to existing terminal output (for streaming)
+      appendTerminal: (outputId: string, text: string) => {
+        if (text) {
+          this.store.commit(events.terminalOutputAppended({
+            outputId,
+            content: {
+              type: "inline",
+              data: text,
+            },
           }));
         }
       },
 
       stderr: (text: string) => {
         if (text) {
-          this.store.commit(events.cellOutputAdded({
+          this.store.commit(events.terminalOutputAdded({
             id: crypto.randomUUID(),
             cellId: cell.id,
-            outputType: "stream",
-            data: {
-              name: "stderr",
-              text,
-            } as StreamOutputData,
-            metadata: {},
             position: outputPosition++,
+            content: {
+              type: "inline",
+              data: text,
+            },
+            streamName: "stderr",
           }));
         }
       },
@@ -541,13 +551,25 @@ export class RuntimeAgent {
         metadata?: Record<string, unknown>,
         displayId?: string,
       ) => {
-        this.store.commit(events.cellOutputAdded({
+        // Convert MediaBundle to representations
+        const representations: Record<
+          string,
+          { type: "inline"; data: unknown; metadata?: Record<string, unknown> }
+        > = {};
+
+        for (const [mimeType, content] of Object.entries(data)) {
+          representations[mimeType] = {
+            type: "inline",
+            data: content, // Keep JSON objects as-is, don't stringify
+            metadata: metadata?.[mimeType] as Record<string, unknown>,
+          };
+        }
+
+        this.store.commit(events.multimediaDisplayOutputAdded({
           id: crypto.randomUUID(),
           cellId: cell.id,
-          outputType: "display_data",
-          data,
-          metadata: metadata || {},
           position: outputPosition++,
+          representations,
           displayId,
         }));
       },
@@ -557,48 +579,91 @@ export class RuntimeAgent {
         data: RichOutputData,
         metadata?: Record<string, unknown>,
       ) => {
-        this.store.commit(events.cellOutputUpdated({
-          id: displayId,
-          data,
-          metadata: metadata || {},
-        }));
+        // For updated displays, we need to find the output and replace it
+        // This is a simplified implementation - could be enhanced
+        context.display(data, metadata, displayId);
       },
 
       result: (
         data: RichOutputData,
         metadata?: Record<string, unknown>,
       ) => {
-        this.store.commit(events.cellOutputAdded({
+        // Convert MediaBundle to representations
+        const representations: Record<
+          string,
+          { type: "inline"; data: unknown; metadata?: Record<string, unknown> }
+        > = {};
+
+        for (const [mimeType, content] of Object.entries(data)) {
+          representations[mimeType] = {
+            type: "inline",
+            data: content, // Keep JSON objects as-is for Altair plots, etc.
+            metadata: metadata?.[mimeType] as Record<string, unknown>,
+          };
+        }
+
+        this.store.commit(events.multimediaResultOutputAdded({
           id: crypto.randomUUID(),
           cellId: cell.id,
-          outputType: "execute_result",
-          data,
-          metadata: metadata || {},
           position: outputPosition++,
+          representations,
+          executionCount: queueEntry.executionCount,
         }));
       },
 
       error: (ename: string, evalue: string, traceback: string[]) => {
-        this.store.commit(events.cellOutputAdded({
+        this.store.commit(events.errorOutputAdded({
           id: crypto.randomUUID(),
           cellId: cell.id,
-          outputType: "error",
-          data: {
-            ename,
-            evalue,
-            traceback,
-          } as ErrorOutputData,
-          metadata: {},
           position: outputPosition++,
+          content: {
+            type: "inline",
+            data: {
+              ename,
+              evalue,
+              traceback,
+            },
+          },
         }));
       },
 
-      clear: () => {
+      // Markdown output methods for AI responses
+      markdown: (content: string, metadata?: Record<string, unknown>) => {
+        const outputId = crypto.randomUUID();
+        this.store.commit(events.markdownOutputAdded({
+          id: outputId,
+          cellId: cell.id,
+          position: outputPosition++,
+          content: {
+            type: "inline",
+            data: content,
+            metadata,
+          },
+        }));
+        return outputId;
+      },
+
+      // Append to existing markdown output (for streaming AI responses)
+      appendMarkdown: (outputId: string, content: string) => {
+        this.store.commit(events.markdownOutputAppended({
+          outputId,
+          content: {
+            type: "inline",
+            data: content,
+          },
+        }));
+      },
+
+      clear: (wait: boolean = false) => {
         this.store.commit(events.cellOutputsCleared({
           cellId: cell.id,
+          wait,
           clearedBy: `kernel-${this.config.kernelId}`,
         }));
-        outputPosition = 0;
+
+        if (!wait) {
+          outputPosition = 0;
+        }
       },
     };
 
@@ -611,24 +676,14 @@ export class RuntimeAgent {
         startedAt: executionStartTime,
       }));
 
-      // Clear previous outputs
-      this.store.commit(events.cellOutputsCleared({
-        cellId: cell.id,
-        clearedBy: `kernel-${this.config.kernelId}`,
-      }));
+      // Clear previous outputs (immediate clear)
+      context.clear(false);
 
       const result: ExecutionResult = await this.executionHandler(context);
 
       // Add output if execution succeeded
       if (result.success && result.data) {
-        this.store.commit(events.cellOutputAdded({
-          id: crypto.randomUUID(),
-          cellId: cell.id,
-          outputType: result.outputType || "execute_result",
-          data: result.data,
-          metadata: result.metadata || {},
-          position: outputPosition++,
-        }));
+        context.result(result.data, result.metadata);
       }
 
       // Mark execution as completed
