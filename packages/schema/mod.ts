@@ -65,7 +65,7 @@ export const tables = {
 
       // SQL-specific fields
       sqlConnectionId: State.SQLite.text({ nullable: true }),
-      sqlResultData: State.SQLite.json({ nullable: true, schema: Schema.Any }),
+      sqlResultVariable: State.SQLite.text({ nullable: true }),
 
       // AI-specific fields
       aiProvider: State.SQLite.text({ nullable: true }), // 'openai', 'anthropic', 'local'
@@ -179,19 +179,6 @@ export const tables = {
       startedAt: State.SQLite.datetime({ nullable: true }),
       completedAt: State.SQLite.datetime({ nullable: true }),
       executionDurationMs: State.SQLite.integer({ nullable: true }),
-    },
-  }),
-
-  // Data connections for SQL cells
-  dataConnections: State.SQLite.table({
-    name: "dataConnections",
-    columns: {
-      id: State.SQLite.text({ primaryKey: true }),
-      name: State.SQLite.text(),
-      type: State.SQLite.text({ schema: Schema.String }),
-      connectionString: State.SQLite.text(), // encrypted connection details
-      isDefault: State.SQLite.boolean({ default: false }),
-      createdBy: State.SQLite.text(),
     },
   }),
 
@@ -470,30 +457,6 @@ export const events = {
     }),
   }),
 
-  // SQL events
-  sqlConnectionCreated: Events.synced({
-    name: "v1.SqlConnectionCreated",
-    schema: Schema.Struct({
-      id: Schema.String,
-      name: Schema.String,
-      type: Schema.String,
-      connectionString: Schema.String,
-      isDefault: Schema.Boolean,
-      createdBy: Schema.String,
-    }),
-  }),
-
-  sqlQueryExecuted: Events.synced({
-    name: "v1.SqlQueryExecuted",
-    schema: Schema.Struct({
-      cellId: Schema.String,
-      connectionId: Schema.String,
-      query: Schema.String,
-      resultData: Schema.Any,
-      executedBy: Schema.String,
-    }),
-  }),
-
   // AI events
   aiSettingsChanged: Events.synced({
     name: "v1.AiSettingsChanged",
@@ -506,6 +469,25 @@ export const events = {
         maxTokens: Schema.optional(Schema.Number),
         systemPrompt: Schema.optional(Schema.String),
       }),
+    }),
+  }),
+
+  // SQL events
+  sqlConnectionChanged: Events.synced({
+    name: "v1.SqlConnectionChanged",
+    schema: Schema.Struct({
+      cellId: Schema.String,
+      connectionId: Schema.optional(Schema.String),
+      changedBy: Schema.String,
+    }),
+  }),
+
+  sqlResultVariableChanged: Events.synced({
+    name: "v1.SqlResultVariableChanged",
+    schema: Schema.Struct({
+      cellId: Schema.String,
+      resultVariable: Schema.optional(Schema.String),
+      changedBy: Schema.String,
     }),
   }),
 
@@ -911,34 +893,6 @@ const materializers = State.SQLite.materializers(events, {
     }
   },
 
-  // SQL materializers
-  "v1.SqlConnectionCreated": ({
-    id,
-    name,
-    type,
-    connectionString,
-    isDefault,
-    createdBy,
-  }) =>
-    tables.dataConnections.insert({
-      id,
-      name,
-      type,
-      connectionString,
-      isDefault,
-      createdBy,
-    }),
-
-  "v1.SqlQueryExecuted": ({ cellId, connectionId, query, resultData }) =>
-    tables.cells
-      .update({
-        source: query,
-        sqlConnectionId: connectionId,
-        sqlResultData: resultData,
-        executionState: "completed",
-      })
-      .where({ id: cellId }),
-
   // AI materializers
   "v1.AiSettingsChanged": ({ cellId, provider, model, settings }) =>
     tables.cells
@@ -946,6 +900,21 @@ const materializers = State.SQLite.materializers(events, {
         aiProvider: provider,
         aiModel: model,
         aiSettings: settings,
+      })
+      .where({ id: cellId }),
+
+  // SQL materializers
+  "v1.SqlConnectionChanged": ({ cellId, connectionId }) =>
+    tables.cells
+      .update({
+        sqlConnectionId: connectionId ?? null,
+      })
+      .where({ id: cellId }),
+
+  "v1.SqlResultVariableChanged": ({ cellId, resultVariable }) =>
+    tables.cells
+      .update({
+        sqlResultVariable: resultVariable ?? null,
       })
       .where({ id: cellId }),
 });
@@ -963,7 +932,6 @@ export type OutputData = typeof tables.outputs.Type;
 
 export type RuntimeSessionData = typeof tables.runtimeSessions.Type;
 export type ExecutionQueueData = typeof tables.executionQueue.Type;
-export type DataConnectionData = typeof tables.dataConnections.Type;
 export type UiStateData = typeof tables.uiState.Type;
 
 // Cell types
@@ -1007,14 +975,6 @@ export type MediaRepresentation = {
   artifactId: string;
   metadata?: Record<string, unknown>;
 };
-
-// SQL-specific types
-export interface SqlResultData {
-  columns: string[];
-  rows: unknown[][];
-  rowCount: number;
-  executionTime: string;
-}
 
 // Output data types for different output formats
 export interface RichOutputData {
