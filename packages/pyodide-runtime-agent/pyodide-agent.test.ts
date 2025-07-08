@@ -125,8 +125,8 @@ Deno.test("PyodideRuntimeAgent configuration", async (t) => {
 
   await t.step("should create agent with valid configuration", () => {
     const validArgs = [
-      "--kernel-id",
-      "test-kernel",
+      "--runtime-id",
+      "test-runtime",
       "--notebook",
       "test-notebook",
       "--auth-token",
@@ -140,16 +140,16 @@ Deno.test("PyodideRuntimeAgent configuration", async (t) => {
     assertEquals(typeof agent.start, "function");
     assertEquals(typeof agent.shutdown, "function");
     assertEquals(typeof agent.keepAlive, "function");
-    assertEquals(agent.config.kernelType, "python3-pyodide");
+    assertEquals(agent.config.runtimeType, "python3-pyodide");
     assertEquals(agent.config.capabilities.canExecuteCode, true);
     assertEquals(agent.config.capabilities.canExecuteSql, false);
     assertEquals(agent.config.capabilities.canExecuteAi, true);
   });
 
-  await t.step("should have correct kernel type and capabilities", () => {
+  await t.step("should have correct runtime type and capabilities", () => {
     const validArgs = [
-      "--kernel-id",
-      "test-kernel",
+      "--runtime-id",
+      "test-runtime",
       "--notebook",
       "test-notebook",
       "--auth-token",
@@ -157,7 +157,7 @@ Deno.test("PyodideRuntimeAgent configuration", async (t) => {
     ];
 
     const agent = new PyodideRuntimeAgent(validArgs);
-    assertEquals(agent.config.kernelType, "python3-pyodide");
+    assertEquals(agent.config.runtimeType, "python3-pyodide");
     assertEquals(agent.config.capabilities.canExecuteCode, true);
     assertEquals(agent.config.capabilities.canExecuteSql, false);
     assertEquals(agent.config.capabilities.canExecuteAi, true);
@@ -168,8 +168,8 @@ Deno.test("PyodideRuntimeAgent lifecycle", async (t) => {
   let agent: PyodideRuntimeAgent;
 
   const validArgs = [
-    "--kernel-id",
-    "test-lifecycle-kernel",
+    "--runtime-id",
+    "test-lifecycle-runtime",
     "--notebook",
     "test-notebook",
     "--auth-token",

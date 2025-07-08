@@ -13,8 +13,8 @@ import { PyodideRuntimeAgent } from "../src/pyodide-agent.ts";
 Deno.test("PyodideRuntimeAgent - Basic Functionality", async (t) => {
   await t.step("creates agent with valid configuration", () => {
     const agentArgs = [
-      "--kernel-id",
-      "test-kernel",
+      "--runtime-id",
+      "test-runtime",
       "--notebook",
       "test-notebook",
       "--auth-token",
@@ -24,8 +24,8 @@ Deno.test("PyodideRuntimeAgent - Basic Functionality", async (t) => {
     const agent = new PyodideRuntimeAgent(agentArgs);
 
     assertExists(agent);
-    assertEquals(agent.config.kernelType, "python3-pyodide");
-    assertEquals(agent.config.kernelId, "test-kernel");
+    assertEquals(agent.config.runtimeType, "python3-pyodide");
+    assertEquals(agent.config.runtimeId, "test-runtime");
     assertEquals(agent.config.notebookId, "test-notebook");
     assertEquals(agent.config.authToken, "test-token");
     assertEquals(agent.config.capabilities.canExecuteCode, true);
@@ -35,8 +35,8 @@ Deno.test("PyodideRuntimeAgent - Basic Functionality", async (t) => {
 
   await t.step("generates unique session IDs", () => {
     const agentArgs = [
-      "--kernel-id",
-      "test-kernel",
+      "--runtime-id",
+      "test-runtime",
       "--notebook",
       "test-notebook",
       "--auth-token",
@@ -55,8 +55,8 @@ Deno.test("PyodideRuntimeAgent - Basic Functionality", async (t) => {
 
   await t.step("handles shutdown gracefully", async () => {
     const agentArgs = [
-      "--kernel-id",
-      "test-kernel",
+      "--runtime-id",
+      "test-runtime",
       "--notebook",
       "test-notebook",
       "--auth-token",
@@ -98,8 +98,8 @@ Deno.test("PyodideRuntimeAgent - Basic Functionality", async (t) => {
 Deno.test("PyodideRuntimeAgent - Configuration", async (t) => {
   await t.step("accepts heartbeat interval", () => {
     const agentArgs = [
-      "--kernel-id",
-      "config-test-kernel",
+      "--runtime-id",
+      "config-test-runtime",
       "--notebook",
       "config-test-notebook",
       "--auth-token",
@@ -108,15 +108,13 @@ Deno.test("PyodideRuntimeAgent - Configuration", async (t) => {
       "5000",
     ];
 
-    const agent = new PyodideRuntimeAgent(agentArgs);
-
-    assertEquals(agent.config.heartbeatInterval, 5000);
+    const _agent = new PyodideRuntimeAgent(agentArgs);
   });
 
   await t.step("uses default values", () => {
     const agentArgs = [
-      "--kernel-id",
-      "default-test-kernel",
+      "--runtime-id",
+      "default-test-runtime",
       "--notebook",
       "default-test-notebook",
       "--auth-token",
@@ -126,22 +124,21 @@ Deno.test("PyodideRuntimeAgent - Configuration", async (t) => {
     const agent = new PyodideRuntimeAgent(agentArgs);
 
     assertStringIncludes(agent.config.syncUrl, "anode-docworker");
-    assertEquals(agent.config.heartbeatInterval, 15000);
   });
 
   await t.step("supports environment variables", () => {
-    Deno.env.set("KERNEL_ID", "env-kernel");
+    Deno.env.set("RUNTIME_ID", "env-runtime");
     Deno.env.set("NOTEBOOK_ID", "env-notebook");
     Deno.env.set("AUTH_TOKEN", "env-token");
 
     try {
       const agent = new PyodideRuntimeAgent([]);
 
-      assertEquals(agent.config.kernelId, "env-kernel");
+      assertEquals(agent.config.runtimeId, "env-runtime");
       assertEquals(agent.config.notebookId, "env-notebook");
       assertEquals(agent.config.authToken, "env-token");
     } finally {
-      Deno.env.delete("KERNEL_ID");
+      Deno.env.delete("RUNTIME_ID");
       Deno.env.delete("NOTEBOOK_ID");
       Deno.env.delete("AUTH_TOKEN");
     }
@@ -153,8 +150,8 @@ Deno.test("PyodideRuntimeAgent - Methods", async (t) => {
 
   await t.step("setup", () => {
     const agentArgs = [
-      "--kernel-id",
-      "method-test-kernel",
+      "--runtime-id",
+      "method-test-runtime",
       "--notebook",
       "method-test-notebook",
       "--auth-token",
@@ -172,8 +169,8 @@ Deno.test("PyodideRuntimeAgent - Methods", async (t) => {
   await t.step("has accessible configuration", () => {
     assertExists(agent.config);
     assertEquals(typeof agent.config, "object");
-    assertExists(agent.config.kernelId);
-    assertExists(agent.config.kernelType);
+    assertExists(agent.config.runtimeId);
+    assertExists(agent.config.runtimeType);
     assertExists(agent.config.notebookId);
     assertExists(agent.config.sessionId);
     assertExists(agent.config.capabilities);

@@ -17,27 +17,25 @@ import type {
  * Configuration options for runtime agents
  */
 export interface RuntimeAgentOptions {
-  /** Unique identifier for this kernel */
-  kernelId: string;
-  /** Human-readable kernel type (appears in UI) */
-  kernelType: string;
-  /** Capabilities this kernel supports */
-  capabilities: KernelCapabilities;
+  /** Unique identifier for this runtime */
+  runtimeId: string;
+  /** Human-readable runtime type (appears in UI) */
+  runtimeType: string;
+  /** Capabilities this runtime supports */
+  capabilities: RuntimeCapabilities;
   /** LiveStore sync URL */
   syncUrl: string;
   /** Authentication token */
   authToken: string;
   /** Notebook ID to connect to */
   notebookId: string;
-  /** Heartbeat interval in milliseconds (default: 15000) */
-  heartbeatInterval?: number;
 }
 
 /**
- * Capabilities that a kernel can advertise to the notebook UI
+ * Capabilities that a runtime can advertise to the notebook UI
  * (extracted from existing schema capabilities structure)
  */
-export interface KernelCapabilities {
+export interface RuntimeCapabilities {
   /** Can execute code cells */
   canExecuteCode: boolean;
   /** Can execute SQL cells */
@@ -56,10 +54,10 @@ export interface ExecutionContext {
   queueEntry: ExecutionQueueData;
   /** LiveStore instance */
   store: Store<typeof schema>;
-  /** This kernel's session ID */
+  /** This runtime's session ID */
   sessionId: string;
-  /** Kernel ID */
-  kernelId: string;
+  /** Runtime ID */
+  runtimeId: string;
 
   /** AbortSignal for cancellation support */
   abortSignal: AbortSignal;
@@ -192,8 +190,8 @@ export type {
   CellData,
   ErrorOutputData,
   ExecutionQueueData,
-  KernelSessionData,
   OutputType,
   RichOutputData,
+  RuntimeSessionData,
   StreamOutputData,
 } from "@runt/schema";

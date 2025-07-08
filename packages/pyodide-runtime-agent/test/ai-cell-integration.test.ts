@@ -13,8 +13,8 @@ Deno.test("PyodideRuntimeAgent - AI Cell Integration", async (t) => {
   await t.step("setup AI cell test environment", async () => {
     await withQuietConsole(async () => {
       const agentArgs = [
-        "--kernel-id",
-        "ai-test-kernel",
+        "--runtime-id",
+        "ai-test-runtime",
         "--notebook",
         "ai-test-notebook",
         "--auth-token",
@@ -69,7 +69,6 @@ Deno.test("PyodideRuntimeAgent - AI Cell Integration", async (t) => {
         cellId: aiCellId,
         executionCount: 1,
         requestedBy: "test",
-        priority: 1,
       }),
     );
 
@@ -167,7 +166,6 @@ Deno.test("PyodideRuntimeAgent - AI Cell Integration", async (t) => {
         cellId: aiCellId,
         executionCount: 1,
         requestedBy: "test",
-        priority: 1,
       }),
     );
 
@@ -232,7 +230,6 @@ Deno.test("PyodideRuntimeAgent - AI Cell Integration", async (t) => {
         cellId: pythonCellId,
         executionCount: 1,
         requestedBy: "test",
-        priority: 1,
       }),
     );
 
@@ -283,7 +280,6 @@ Deno.test("PyodideRuntimeAgent - AI Cell Integration", async (t) => {
         cellId: aiCellId,
         executionCount: 1,
         requestedBy: "test",
-        priority: 1,
       }),
     );
 
@@ -344,8 +340,8 @@ Deno.test("PyodideRuntimeAgent - AI Cell Error Handling", async (t) => {
   await t.step("setup", async () => {
     await withQuietConsole(async () => {
       const agentArgs = [
-        "--kernel-id",
-        "ai-error-test-kernel",
+        "--runtime-id",
+        "ai-error-test-runtime",
         "--notebook",
         "ai-error-test-notebook",
         "--auth-token",
@@ -392,7 +388,6 @@ Deno.test("PyodideRuntimeAgent - AI Cell Error Handling", async (t) => {
         cellId: aiCellId,
         executionCount: 1,
         requestedBy: "test",
-        priority: 1,
       }),
     );
 

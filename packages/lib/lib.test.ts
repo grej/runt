@@ -19,15 +19,14 @@ Deno.test("DEFAULT_CONFIG has expected values", () => {
     DEFAULT_CONFIG.syncUrl,
     "wss://anode-docworker.rgbkrk.workers.dev",
   );
-  assertEquals(DEFAULT_CONFIG.heartbeatInterval, 15000);
 });
 
 Deno.test("RuntimeConfig validation works", () => {
   // Should throw for missing required fields
   try {
     const config = new RuntimeConfig({
-      kernelId: "test",
-      kernelType: "test",
+      runtimeId: "test",
+      runtimeType: "test",
       syncUrl: "ws://test",
       authToken: "", // Missing
       notebookId: "", // Missing
@@ -48,8 +47,8 @@ Deno.test("RuntimeConfig validation works", () => {
 
   // Should pass with all required fields
   const config = new RuntimeConfig({
-    kernelId: "test",
-    kernelType: "test",
+    runtimeId: "test",
+    runtimeType: "test",
     syncUrl: "ws://test",
     authToken: "token",
     notebookId: "notebook",

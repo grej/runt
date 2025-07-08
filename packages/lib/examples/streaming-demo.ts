@@ -15,7 +15,7 @@ class StreamingDemoAgent {
     let config;
     try {
       config = createRuntimeConfig(Deno.args, {
-        kernelType: "streaming-demo",
+        runtimeType: "streaming-demo",
         capabilities: {
           canExecuteCode: true,
           canExecuteSql: false,
@@ -69,14 +69,14 @@ class StreamingDemoAgent {
           id: cellId,
           cellType: "code",
           position: 0,
-          createdBy: "streaming-demo-kernel",
+          createdBy: "streaming-demo-runtime",
         }));
 
         // Update the cell with source content
         this.agent.liveStore.commit(events.cellSourceChanged({
           id: cellId,
           source: "help",
-          modifiedBy: "streaming-demo-kernel",
+          modifiedBy: "streaming-demo-runtime",
         }));
 
         // Queue it for execution
@@ -85,8 +85,7 @@ class StreamingDemoAgent {
           queueId: queueId,
           cellId: cellId,
           executionCount: 1,
-          requestedBy: "streaming-demo-kernel",
-          priority: 0,
+          requestedBy: "streaming-demo-runtime",
         }));
       }
     } catch (error) {

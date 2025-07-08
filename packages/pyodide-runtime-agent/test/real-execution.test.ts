@@ -12,8 +12,8 @@ import type { RichOutputData } from "@runt/schema";
 // Create test agent with minimal packages for speed
 function createTestAgent(packages?: string[]): PyodideRuntimeAgent {
   const validArgs = [
-    "--kernel-id",
-    "test-execution-kernel",
+    "--runtime-id",
+    "test-execution-runtime",
     "--notebook",
     "test-notebook",
     "--auth-token",
@@ -59,7 +59,7 @@ function createTestExecutionContext(code: string): {
       position: 0,
       executionCount: 1,
       executionState: "running",
-      assignedKernelSession: null,
+      assignedRuntimeSession: null,
       lastExecutionDurationMs: null,
       sqlConnectionId: null,
       sqlResultData: null,
@@ -77,17 +77,14 @@ function createTestExecutionContext(code: string): {
       executionCount: 1,
       requestedBy: "test-user",
       status: "executing" as const,
-      assignedKernelSession: "test-session",
-      priority: 0,
-      retryCount: 0,
-      maxRetries: 3,
+      assignedRuntimeSession: "test-session",
       startedAt: new Date(),
       completedAt: null,
       executionDurationMs: null,
     },
     store: {} as ExecutionContext["store"], // Minimal mock - not used in these tests
     sessionId: "test-session",
-    kernelId: "pyodide-test-kernel",
+    runtimeId: "pyodide-test-runtime",
     abortSignal: abortController.signal,
     checkCancellation: () => {
       if (abortController.signal.aborted) {
@@ -130,13 +127,13 @@ Deno.test("Custom package configuration", () => {
   const agent = createTestAgent(customPackages);
 
   assertExists(agent);
-  assertEquals(agent.config.kernelType, "python3-pyodide");
+  assertEquals(agent.config.runtimeType, "python3-pyodide");
 });
 
 Deno.test("Agent initialization with custom packages", async () => {
   const agent = createTestAgent(["micropip", "ipython", "matplotlib"]);
   assertExists(agent);
-  assertEquals(agent.config.kernelType, "python3-pyodide");
+  assertEquals(agent.config.runtimeType, "python3-pyodide");
 
   await agent.shutdown();
 });

@@ -32,7 +32,7 @@ export const tables = {
     columns: {
       id: State.SQLite.text({ primaryKey: true }), // Same as storeId
       title: State.SQLite.text({ default: "Untitled Notebook" }),
-      kernelType: State.SQLite.text({ default: "python3" }),
+      runtimeType: State.SQLite.text({ default: "python3" }),
       ownerId: State.SQLite.text(),
       isPublic: State.SQLite.boolean({ default: false }),
     },
@@ -60,7 +60,7 @@ export const tables = {
           "error",
         ),
       }),
-      assignedKernelSession: State.SQLite.text({ nullable: true }), // Which kernel session is handling this
+      assignedRuntimeSession: State.SQLite.text({ nullable: true }), // Which runtime session is handling this
       lastExecutionDurationMs: State.SQLite.integer({ nullable: true }), // Duration of last execution in milliseconds
 
       // SQL-specific fields
@@ -125,15 +125,15 @@ export const tables = {
     },
   }),
 
-  // Kernel lifecycle management
-  // NOTE: Each notebook should have exactly ONE active kernel at a time
-  // Multiple entries only exist during kernel transitions/handoffs
-  kernelSessions: State.SQLite.table({
-    name: "kernelSessions",
+  // Runtime lifecycle management
+  // NOTE: Each notebook should have exactly ONE active runtime at a time
+  // Multiple entries only exist during runtime transitions/handoffs
+  runtimeSessions: State.SQLite.table({
+    name: "runtimeSessions",
     columns: {
       sessionId: State.SQLite.text({ primaryKey: true }),
-      kernelId: State.SQLite.text(), // Stable kernel identifier
-      kernelType: State.SQLite.text({ default: "python3" }),
+      runtimeId: State.SQLite.text(), // Stable runtime identifier
+      runtimeType: State.SQLite.text({ default: "python3" }),
       status: State.SQLite.text({
         schema: Schema.Literal(
           "starting",
@@ -149,9 +149,6 @@ export const tables = {
       canExecuteCode: State.SQLite.boolean({ default: false }),
       canExecuteSql: State.SQLite.boolean({ default: false }),
       canExecuteAi: State.SQLite.boolean({ default: false }),
-
-      // Heartbeat tracking
-      lastHeartbeat: State.SQLite.datetime({ nullable: true }),
     },
   }),
 
@@ -176,12 +173,7 @@ export const tables = {
           "cancelled",
         ),
       }),
-      assignedKernelSession: State.SQLite.text({ nullable: true }),
-
-      // Priority and metadata
-      priority: State.SQLite.integer({ default: 0 }), // Higher = more important
-      retryCount: State.SQLite.integer({ default: 0 }),
-      maxRetries: State.SQLite.integer({ default: 3 }),
+      assignedRuntimeSession: State.SQLite.text({ nullable: true }),
 
       // Execution timing
       startedAt: State.SQLite.datetime({ nullable: true }),
@@ -209,7 +201,7 @@ export const tables = {
     schema: Schema.Struct({
       selectedCellId: Schema.optional(Schema.String),
       editingCellId: Schema.optional(Schema.String),
-      kernelStatus: Schema.optional(Schema.String),
+      runtimeStatus: Schema.optional(Schema.String),
     }),
     default: {
       id: SessionIdSymbol,
@@ -305,13 +297,13 @@ export const events = {
     }),
   }),
 
-  // Kernel lifecycle events
-  kernelSessionStarted: Events.synced({
-    name: "v1.KernelSessionStarted",
+  // Runtime lifecycle events
+  runtimeSessionStarted: Events.synced({
+    name: "v1.RuntimeSessionStarted",
     schema: Schema.Struct({
-      sessionId: Schema.String, // Unique per kernel restart
-      kernelId: Schema.String, // Stable kernel identifier
-      kernelType: Schema.String,
+      sessionId: Schema.String, // Unique per runtime restart
+      runtimeId: Schema.String, // Stable runtime identifier
+      runtimeType: Schema.String,
       capabilities: Schema.Struct({
         canExecuteCode: Schema.Boolean,
         canExecuteSql: Schema.Boolean,
@@ -320,20 +312,25 @@ export const events = {
     }),
   }),
 
-  kernelSessionHeartbeat: Events.synced({
-    name: "v1.KernelSessionHeartbeat",
+  runtimeSessionStatusChanged: Events.synced({
+    name: "v1.RuntimeSessionStatusChanged",
     schema: Schema.Struct({
       sessionId: Schema.String,
-      status: Schema.Literal("ready", "busy"),
-      timestamp: Schema.Date,
+      status: Schema.Literal("ready", "busy", "restarting"),
     }),
   }),
 
-  kernelSessionTerminated: Events.synced({
-    name: "v1.KernelSessionTerminated",
+  runtimeSessionTerminated: Events.synced({
+    name: "v1.RuntimeSessionTerminated",
     schema: Schema.Struct({
       sessionId: Schema.String,
-      reason: Schema.Literal("shutdown", "restart", "error", "timeout"),
+      reason: Schema.Literal(
+        "shutdown",
+        "restart",
+        "error",
+        "timeout",
+        "displaced",
+      ),
     }),
   }),
 
@@ -345,7 +342,6 @@ export const events = {
       cellId: Schema.String,
       executionCount: Schema.Number,
       requestedBy: Schema.String,
-      priority: Schema.Number,
     }),
   }),
 
@@ -353,7 +349,7 @@ export const events = {
     name: "v1.ExecutionAssigned",
     schema: Schema.Struct({
       queueId: Schema.String,
-      kernelSessionId: Schema.String,
+      runtimeSessionId: Schema.String,
     }),
   }),
 
@@ -362,7 +358,7 @@ export const events = {
     schema: Schema.Struct({
       queueId: Schema.String,
       cellId: Schema.String,
-      kernelSessionId: Schema.String,
+      runtimeSessionId: Schema.String,
       startedAt: Schema.Date,
     }),
   }),
@@ -558,33 +554,32 @@ const materializers = State.SQLite.materializers(events, {
   "v1.CellAiContextVisibilityToggled": ({ id, aiContextVisible }) =>
     tables.cells.update({ aiContextVisible }).where({ id }),
 
-  // Kernel lifecycle materializers
-  "v1.KernelSessionStarted": ({
+  // Runtime lifecycle materializers
+  "v1.RuntimeSessionStarted": ({
     sessionId,
-    kernelId,
-    kernelType,
+    runtimeId,
+    runtimeType,
     capabilities,
   }) =>
-    tables.kernelSessions.insert({
+    tables.runtimeSessions.insert({
       sessionId,
-      kernelId,
-      kernelType,
-      status: "ready",
+      runtimeId,
+      runtimeType,
+      status: "starting",
       canExecuteCode: capabilities.canExecuteCode,
       canExecuteSql: capabilities.canExecuteSql,
       canExecuteAi: capabilities.canExecuteAi,
     }),
 
-  "v1.KernelSessionHeartbeat": ({ sessionId, status, timestamp }) =>
-    tables.kernelSessions
+  "v1.RuntimeSessionStatusChanged": ({ sessionId, status }) =>
+    tables.runtimeSessions
       .update({
-        status: status === "ready" ? "ready" : "busy",
-        lastHeartbeat: timestamp,
+        status,
       })
       .where({ sessionId }),
 
-  "v1.KernelSessionTerminated": ({ sessionId }) =>
-    tables.kernelSessions
+  "v1.RuntimeSessionTerminated": ({ sessionId }) =>
+    tables.runtimeSessions
       .update({
         status: "terminated",
         isActive: false,
@@ -597,14 +592,12 @@ const materializers = State.SQLite.materializers(events, {
     cellId,
     executionCount,
     requestedBy,
-    priority,
   }) => [
     tables.executionQueue.insert({
       id: queueId,
       cellId,
       executionCount,
       requestedBy,
-      priority,
       status: "pending",
     }),
     // Update cell execution state
@@ -616,15 +609,15 @@ const materializers = State.SQLite.materializers(events, {
       .where({ id: cellId }),
   ],
 
-  "v1.ExecutionAssigned": ({ queueId, kernelSessionId }) =>
+  "v1.ExecutionAssigned": ({ queueId, runtimeSessionId }) =>
     tables.executionQueue
       .update({
         status: "assigned",
-        assignedKernelSession: kernelSessionId,
+        assignedRuntimeSession: runtimeSessionId,
       })
       .where({ id: queueId }),
 
-  "v1.ExecutionStarted": ({ queueId, cellId, startedAt }) => [
+  "v1.ExecutionStarted": ({ queueId, cellId, runtimeSessionId, startedAt }) => [
     // Update execution queue
     tables.executionQueue
       .update({
@@ -636,6 +629,7 @@ const materializers = State.SQLite.materializers(events, {
     tables.cells
       .update({
         executionState: "running",
+        assignedRuntimeSession: runtimeSessionId,
       })
       .where({ id: cellId }),
   ],
@@ -967,7 +961,7 @@ export type NotebookData = typeof tables.notebook.Type;
 export type CellData = typeof tables.cells.Type;
 export type OutputData = typeof tables.outputs.Type;
 
-export type KernelSessionData = typeof tables.kernelSessions.Type;
+export type RuntimeSessionData = typeof tables.runtimeSessions.Type;
 export type ExecutionQueueData = typeof tables.executionQueue.Type;
 export type DataConnectionData = typeof tables.dataConnections.Type;
 export type UiStateData = typeof tables.uiState.Type;
@@ -983,8 +977,8 @@ export type ExecutionState =
   | "completed"
   | "error";
 
-// Kernel session statuses
-export type KernelStatus =
+// Runtime session statuses
+export type RuntimeStatus =
   | "starting"
   | "ready"
   | "busy"

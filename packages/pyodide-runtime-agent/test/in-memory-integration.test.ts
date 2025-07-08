@@ -28,12 +28,12 @@ Deno.test({
     await t.step("can create agent with test config", async () => {
       await withQuietConsole(() => {
         const notebookId = `test-${crypto.randomUUID()}`;
-        const kernelId = `kernel-${crypto.randomUUID()}`;
+        const runtimeId = `runtime-${crypto.randomUUID()}`;
 
         // Use a local-only sync URL - LiveStore works purely in-memory
         const agentArgs = [
-          "--kernel-id",
-          kernelId,
+          "--runtime-id",
+          runtimeId,
           "--notebook",
           notebookId,
           "--auth-token",
@@ -46,7 +46,7 @@ Deno.test({
 
         assertExists(agent);
         assertEquals(agent.config.notebookId, notebookId);
-        assertEquals(agent.config.kernelId, kernelId);
+        assertEquals(agent.config.runtimeId, runtimeId);
         assertEquals(agent.config.authToken, "test-token");
       });
     });
@@ -105,7 +105,6 @@ Deno.test({
         cellId,
         executionCount: 1,
         requestedBy: "test-user",
-        priority: 1,
       }));
 
       console.log("📊 Waiting for agent to process execution...");

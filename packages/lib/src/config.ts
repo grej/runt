@@ -5,41 +5,37 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import { createLogger } from "./logging.ts";
-import type { KernelCapabilities, RuntimeAgentOptions } from "./types.ts";
+import type { RuntimeAgentOptions, RuntimeCapabilities } from "./types.ts";
 
 /**
  * Default configuration values
  */
 export const DEFAULT_CONFIG = {
   syncUrl: "wss://anode-docworker.rgbkrk.workers.dev",
-  heartbeatInterval: 15000,
 } as const;
 
 /**
  * Configuration class for runtime agents
  */
 export class RuntimeConfig {
-  public readonly kernelId: string;
-  public readonly kernelType: string;
+  public readonly runtimeId: string;
+  public readonly runtimeType: string;
   public readonly syncUrl: string;
   public readonly authToken: string;
   public readonly notebookId: string;
-  public readonly heartbeatInterval: number;
-  public readonly capabilities: KernelCapabilities;
+  public readonly capabilities: RuntimeCapabilities;
   public readonly sessionId: string;
 
   constructor(options: RuntimeAgentOptions) {
-    this.kernelId = options.kernelId;
-    this.kernelType = options.kernelType;
+    this.runtimeId = options.runtimeId;
+    this.runtimeType = options.runtimeType;
     this.syncUrl = options.syncUrl;
     this.authToken = options.authToken;
     this.notebookId = options.notebookId;
-    this.heartbeatInterval = options.heartbeatInterval ??
-      DEFAULT_CONFIG.heartbeatInterval;
     this.capabilities = options.capabilities;
 
     // Generate unique session ID
-    this.sessionId = `${this.kernelId}-${Date.now()}-${
+    this.sessionId = `${this.runtimeType}-${this.runtimeId}-${Date.now()}-${
       Math.random().toString(36).slice(2)
     }`;
   }
@@ -62,16 +58,16 @@ export class RuntimeConfig {
         suggestion: "--notebook <id> or NOTEBOOK_ID env var",
       });
     }
-    if (!this.kernelId) {
+    if (!this.runtimeId) {
       missing.push({
-        field: "kernelId",
-        suggestion: "--kernel-id <id> or KERNEL_ID env var",
+        field: "runtimeId",
+        suggestion: "--runtime-id <id> or RUNTIME_ID env var",
       });
     }
-    if (!this.kernelType) {
+    if (!this.runtimeType) {
       missing.push({
-        field: "kernelType",
-        suggestion: "--kernel-type <type> or KERNEL_TYPE env var",
+        field: "runtimeType",
+        suggestion: "--runtime-type <type> or RUNTIME_TYPE env var",
       });
     }
 
@@ -97,8 +93,8 @@ export function parseRuntimeArgs(args: string[]): Partial<RuntimeAgentOptions> {
       "notebook",
       "auth-token",
       "sync-url",
-      "kernel-id",
-      "kernel-type",
+      "runtime-id",
+      "runtime-type",
       "heartbeat-interval",
     ],
     boolean: ["help"],
@@ -106,8 +102,8 @@ export function parseRuntimeArgs(args: string[]): Partial<RuntimeAgentOptions> {
       n: "notebook",
       t: "auth-token",
       s: "sync-url",
-      k: "kernel-id",
-      T: "kernel-type",
+      r: "runtime-id",
+      T: "runtime-type",
       h: "help",
     },
   });
@@ -127,12 +123,10 @@ Required Options:
 Optional Options:
   --sync-url, -s <url>       WebSocket URL for LiveStore sync
                              (default: ${DEFAULT_CONFIG.syncUrl})
-  --kernel-id, -k <id>       Unique kernel identifier
-                             (default: <kernel-type>-kernel-{pid})
-  --kernel-type, -T <type>   Kernel type identifier
+  --runtime-id, -R <id>      Runtime identifier
+                             (default: <runtime-type>-runtime-{pid})
+  --runtime-type, -T <type>  Runtime type identifier
                              (default: "runtime")
-  --heartbeat-interval <ms>  Heartbeat interval in milliseconds
-                             (default: ${DEFAULT_CONFIG.heartbeatInterval})
   --help, -h                 Show this help message
 
 Examples:
@@ -140,7 +134,7 @@ Examples:
   deno run --allow-net --allow-env main.ts --notebook=test --auth-token=abc123
 
 Environment Variables (fallback):
-  NOTEBOOK_ID, AUTH_TOKEN, LIVESTORE_SYNC_URL, KERNEL_ID, KERNEL_TYPE
+  NOTEBOOK_ID, AUTH_TOKEN, LIVESTORE_SYNC_URL, RUNTIME_ID, RUNTIME_TYPE
 
 Logging Configuration:
   RUNT_LOG_LEVEL             Set to DEBUG, INFO, WARN, or ERROR (default: INFO)
@@ -160,20 +154,13 @@ Logging Configuration:
   const authToken = parsed["auth-token"] || Deno.env.get("AUTH_TOKEN");
   if (authToken) result.authToken = authToken;
 
-  const kernelId = parsed["kernel-id"] || Deno.env.get("KERNEL_ID");
-  if (kernelId) result.kernelId = kernelId;
-
-  const kernelType = parsed["kernel-type"] || Deno.env.get("KERNEL_TYPE");
-  if (kernelType) result.kernelType = kernelType;
-
-  const heartbeatInterval = parsed["heartbeat-interval"] ||
-    Deno.env.get("HEARTBEAT_INTERVAL");
-  if (heartbeatInterval) {
-    const parsed = parseInt(heartbeatInterval, 10);
-    if (!isNaN(parsed) && parsed > 0) {
-      result.heartbeatInterval = parsed;
-    }
+  const runtimeType = parsed["runtime-type"] || Deno.env.get("RUNTIME_TYPE");
+  if (runtimeType && typeof runtimeType === "string") {
+    result.runtimeType = runtimeType;
   }
+
+  const runtimeId = parsed["runtime-id"] || Deno.env.get("RUNTIME_ID");
+  if (runtimeId && typeof runtimeId === "string") result.runtimeId = runtimeId;
 
   return result;
 }
@@ -189,7 +176,7 @@ export function createRuntimeConfig(
 
   // Merge CLI config with defaults - CLI args override defaults
   const mergedDefaults = {
-    kernelType: "runtime",
+    runtimeType: "runtime",
     syncUrl: DEFAULT_CONFIG.syncUrl,
     capabilities: {
       canExecuteCode: true,
@@ -207,19 +194,22 @@ export function createRuntimeConfig(
   const config: RuntimeAgentOptions = {
     ...mergedDefaults,
     ...cleanCliConfig,
-    // Generate kernelId after merging to use correct kernelType
-    kernelId: cliConfig.kernelId ||
-      Deno.env.get("KERNEL_ID") ||
-      `${mergedDefaults.kernelType}-kernel-${Deno.pid}`,
   } as RuntimeAgentOptions;
+
+  // Generate runtimeId after merging to use correct runtimeType
+  if (!config.runtimeId) {
+    config.runtimeId = cliConfig.runtimeId ||
+      Deno.env.get("RUNTIME_ID") ||
+      `${config.runtimeType}-runtime-${Deno.pid}`;
+  }
 
   const runtimeConfig = new RuntimeConfig(config);
   runtimeConfig.validate();
 
   const logger = createLogger("config");
   logger.debug("Runtime configuration created", {
-    kernelType: runtimeConfig.kernelType,
-    kernelId: runtimeConfig.kernelId,
+    runtimeType: runtimeConfig.runtimeType,
+    runtimeId: runtimeConfig.runtimeId,
     syncUrl: runtimeConfig.syncUrl,
     notebookId: runtimeConfig.notebookId,
     sessionId: runtimeConfig.sessionId,
