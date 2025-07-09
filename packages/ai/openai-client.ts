@@ -1,5 +1,10 @@
 import OpenAI from "@openai/openai";
-import { createLogger, type ExecutionContext } from "@runt/lib";
+import {
+  type AiModel,
+  createLogger,
+  type ExecutionContext,
+  type ModelCapability,
+} from "@runt/lib";
 
 import { NOTEBOOK_TOOLS } from "./tool-registry.ts";
 
@@ -96,6 +101,119 @@ export class RuntOpenAIClient {
       this.configure();
     }
     return this.isConfigured && this.client !== null;
+  }
+
+  /**
+   * Get hardcoded OpenAI model capabilities
+   * (OpenAI doesn't expose capabilities via API)
+   */
+  private getOpenAIModelCapabilities(modelName: string): ModelCapability[] {
+    const capabilities: ModelCapability[] = ["completion"];
+
+    // All current OpenAI models support tools
+    capabilities.push("tools");
+
+    // Vision models
+    if (
+      modelName.includes("gpt-4o") ||
+      modelName.includes("gpt-4.1") ||
+      modelName.includes("o3") ||
+      modelName.includes("o4")
+    ) {
+      capabilities.push("vision");
+    }
+
+    // Reasoning models
+    if (
+      modelName.includes("o1") ||
+      modelName.includes("o3") ||
+      modelName.includes("o4")
+    ) {
+      capabilities.push("thinking");
+    }
+
+    return capabilities;
+  }
+
+  /**
+   * Get available OpenAI models (hardcoded for now)
+   */
+  private getOpenAIModels(): Array<{
+    name: string;
+    displayName: string;
+    contextLength: number;
+    deprecated?: boolean;
+  }> {
+    return [
+      // Latest flagship models
+      {
+        name: "o4-mini",
+        displayName: "o4-mini",
+        contextLength: 200000,
+      },
+      {
+        name: "o3",
+        displayName: "o3",
+        contextLength: 200000,
+      },
+      {
+        name: "gpt-4.1",
+        displayName: "GPT-4.1",
+        contextLength: 1047552,
+      },
+      // Current stable models
+      {
+        name: "gpt-4o",
+        displayName: "GPT-4o",
+        contextLength: 128000,
+      },
+      {
+        name: "gpt-4o-mini",
+        displayName: "GPT-4o Mini",
+        contextLength: 128000,
+      },
+      {
+        name: "o1",
+        displayName: "o1",
+        contextLength: 128000,
+      },
+      {
+        name: "o1-mini",
+        displayName: "o1 Mini",
+        contextLength: 128000,
+      },
+    ];
+  }
+
+  /**
+   * Discover available AI models with their capabilities
+   */
+  discoverAiModels(): Promise<AiModel[]> {
+    if (!this.isReady()) {
+      this.logger.warn("OpenAI client not ready, returning empty models list");
+      return Promise.resolve([]);
+    }
+
+    try {
+      const models = this.getOpenAIModels();
+      const aiModels: AiModel[] = [];
+
+      for (const model of models) {
+        const capabilities = this.getOpenAIModelCapabilities(model.name);
+
+        aiModels.push({
+          name: model.name,
+          displayName: model.displayName,
+          provider: "openai",
+          capabilities,
+        });
+      }
+
+      return Promise.resolve(aiModels);
+    } catch (error) {
+      this.logger.error("Failed to discover OpenAI models", error);
+      return Promise.resolve([]);
+    }
   }
 
   async generateAgenticResponse(

@@ -42,7 +42,36 @@ export interface RuntimeCapabilities {
   canExecuteSql: boolean;
   /** Can execute AI cells */
   canExecuteAi: boolean;
+  /** Available AI models with their capabilities */
+  availableAiModels?: AiModel[];
 }
+
+/**
+ * Represents an AI model with its capabilities
+ */
+export interface AiModel {
+  /** Model identifier (e.g., "gpt-4o-mini", "llama3.1") */
+  name: string;
+  /** Human-readable display name */
+  displayName: string;
+  /** AI provider (e.g., "openai", "ollama", "anthropic") */
+  provider: string;
+  /** Model capabilities */
+  capabilities: ModelCapability[];
+  /** Model metadata (size, type, etc.) */
+  metadata?: {
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * Capabilities that an AI model can have
+ */
+export type ModelCapability =
+  | "completion" // Basic text completion
+  | "tools" // Function/tool calling
+  | "vision" // Image understanding
+  | "thinking"; // Chain of thought reasoning
 
 /**
  * Execution context passed to handlers
