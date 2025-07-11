@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
 import { buildConversationMessages, type NotebookContextData } from "../mod.ts";
+import { AI_TOOL_CALL_MIME_TYPE, AI_TOOL_RESULT_MIME_TYPE } from "@runt/schema";
 
 // Helper types for test assertions
 interface AssistantMessageWithToolCalls {
@@ -82,7 +83,7 @@ Deno.test("AI conversation rendering - flattened tool calls", () => {
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool+json": {
+              [AI_TOOL_CALL_MIME_TYPE]: {
                 tool_call_id: "call_123",
                 tool_name: "create_cell",
                 arguments: {
@@ -98,7 +99,7 @@ Deno.test("AI conversation rendering - flattened tool calls", () => {
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool.result+json": {
+              [AI_TOOL_RESULT_MIME_TYPE]: {
                 tool_call_id: "call_123",
                 result: "Created code cell: cell-abc123",
                 status: "success",
@@ -234,7 +235,7 @@ Deno.test("AI conversation rendering - sequential tool call flow", () => {
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool+json": {
+              [AI_TOOL_CALL_MIME_TYPE]: {
                 tool_call_id: "call_1",
                 tool_name: "create_cell",
                 arguments: {
@@ -250,7 +251,7 @@ Deno.test("AI conversation rendering - sequential tool call flow", () => {
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool.result+json": {
+              [AI_TOOL_RESULT_MIME_TYPE]: {
                 tool_call_id: "call_1",
                 result: "Created code cell: cell-abc",
                 status: "success",
@@ -262,7 +263,7 @@ Deno.test("AI conversation rendering - sequential tool call flow", () => {
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool+json": {
+              [AI_TOOL_CALL_MIME_TYPE]: {
                 tool_call_id: "call_2",
                 tool_name: "create_cell",
                 arguments: {
@@ -277,7 +278,7 @@ Deno.test("AI conversation rendering - sequential tool call flow", () => {
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool.result+json": {
+              [AI_TOOL_RESULT_MIME_TYPE]: {
                 tool_call_id: "call_2",
                 result: "Created code cell: cell-def",
                 status: "success",
@@ -439,7 +440,7 @@ Deno.test("AI conversation rendering - tool calls without text responses", () =>
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool+json": {
+              [AI_TOOL_CALL_MIME_TYPE]: {
                 tool_call_id: "call_only",
                 tool_name: "execute_cell",
                 arguments: { cellId: "some-cell" },
@@ -450,7 +451,7 @@ Deno.test("AI conversation rendering - tool calls without text responses", () =>
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool.result+json": {
+              [AI_TOOL_RESULT_MIME_TYPE]: {
                 tool_call_id: "call_only",
                 result: "Execution completed",
                 status: "success",
@@ -578,7 +579,7 @@ Deno.test("AI conversation rendering - complex interleaved conversation", () => 
           {
             outputType: "display_data",
             data: {
-              "application/vnd.anode.aitool+json": {
+              [AI_TOOL_CALL_MIME_TYPE]: {
                 tool_call_id: "improve_call",
                 tool_name: "create_cell",
                 arguments: {
@@ -1052,6 +1053,88 @@ Deno.test("AI conversation rendering - debug UI scenario", () => {
   // The AI's previous conversation with numbered options is fully preserved
   // The context includes all relevant code and outputs
   // The sequential tool call flow maintains perfect OpenAI compatibility
+});
+
+Deno.test("AI conversation rendering - markdown outputs as assistant messages", () => {
+  const context: NotebookContextData = {
+    previousCells: [
+      {
+        id: "cell-1",
+        cellType: "ai",
+        source: "What is 2 + 2?",
+        position: 1,
+        outputs: [
+          // AI response as markdown output (streaming response)
+          {
+            outputType: "markdown",
+            data: "2 + 2 equals 4. This is a basic arithmetic operation.",
+            metadata: {
+              anode: {
+                role: "assistant",
+                ai_provider: "openai",
+                ai_model: "gpt-4o-mini",
+                iteration: 1,
+              },
+            },
+          },
+        ],
+      },
+      {
+        id: "cell-2",
+        cellType: "ai",
+        source: "Create a simple example",
+        position: 2,
+        outputs: [
+          // AI response as display_data output
+          {
+            outputType: "display_data",
+            data: {
+              "text/markdown": "I'll create a simple example for you.",
+              "text/plain": "I'll create a simple example for you.",
+            },
+            metadata: {
+              anode: {
+                role: "assistant",
+                ai_provider: "openai",
+                ai_model: "gpt-4o-mini",
+                iteration: 1,
+              },
+            },
+          },
+        ],
+      },
+    ],
+    totalCells: 2,
+    currentCellPosition: 2,
+  };
+
+  const messages = buildConversationMessages(
+    context,
+    "You are a helpful assistant.",
+    "What else can you help with?",
+  );
+
+  // Should have: system, assistant (markdown), assistant (display_data), user (prompt)
+  assertEquals(messages.length, 4);
+  assertEquals(messages[0].role, "system");
+  assertEquals(messages[1].role, "assistant");
+  assertEquals(messages[2].role, "assistant");
+  assertEquals(messages[3].role, "user");
+
+  // Check first assistant message (from markdown output)
+  assertEquals(
+    messages[1].content,
+    "2 + 2 equals 4. This is a basic arithmetic operation.",
+  );
+
+  // Check second assistant message (from display_data output)
+  assertEquals(
+    messages[2].content,
+    "I'll create a simple example for you.",
+  );
+
+  // Check current prompt is last
+  assertEquals(messages[3].content, "What else can you help with?");
 });
 
 Deno.test("AI conversation rendering - integrated code cells in conversation", () => {

@@ -1,5 +1,9 @@
 import { type CellData, events, type Store, tables } from "@runt/schema";
 import type { Logger } from "@runt/lib";
+import { createLogger } from "@runt/lib";
+
+// Create logger for tool execution debugging
+const toolLogger = createLogger("ai-tools");
 
 interface NotebookTool {
   name: string;
@@ -323,17 +327,52 @@ export async function handleToolCallWithResult(
                     output.outputType === "multimedia_result"
                   ) {
                     // Try to get text representation from representations or fallback to data
+                    // Prioritize markdown for AI context, then plain text
                     let resultText = "";
+                    let usedFormat = "";
+
+                    toolLogger.debug(
+                      "Processing multimedia_result for tool response",
+                      {
+                        cellId,
+                        hasRepresentations: !!output.representations,
+                        representationKeys: output.representations
+                          ? Object.keys(output.representations)
+                          : [],
+                        hasData: !!output.data,
+                      },
+                    );
+
                     if (
+                      output.representations &&
+                      output.representations["text/markdown"]
+                    ) {
+                      const container = output.representations["text/markdown"];
+                      if (container.type === "inline") {
+                        resultText = String(container.data || "");
+                        usedFormat = "text/markdown";
+                      }
+                    } else if (
                       output.representations &&
                       output.representations["text/plain"]
                     ) {
-                      resultText = String(
-                        output.representations["text/plain"].data || "",
-                      );
+                      const container = output.representations["text/plain"];
+                      if (container.type === "inline") {
+                        resultText = String(container.data || "");
+                        usedFormat = "text/plain";
+                      }
                     } else if (output.data) {
                       resultText = String(output.data);
+                      usedFormat = "raw_data";
                     }
+
+                    toolLogger.debug("Tool result content extracted", {
+                      cellId,
+                      usedFormat,
+                      contentLength: resultText.length,
+                      fullContent: resultText,
+                    });
+
                     if (resultText) {
                       outputTexts.push(`Result: ${resultText.trim()}`);
                     }

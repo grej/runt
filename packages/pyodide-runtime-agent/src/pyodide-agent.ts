@@ -7,28 +7,21 @@
 import { createRuntimeConfig, RuntimeAgent } from "@runt/lib";
 import type { ExecutionContext } from "@runt/lib";
 import { createLogger } from "@runt/lib";
+import { type MediaBundle, validateMediaBundle } from "@runt/lib";
 import {
-  ensureTextPlainFallback,
   isJsonMimeType,
   isTextBasedMimeType,
   KNOWN_MIME_TYPES,
   type KnownMimeType,
-  type MediaBundle,
-  toAIMediaBundle,
-  validateMediaBundle,
-} from "@runt/lib";
+} from "@runt/schema";
 import { getEssentialPackages } from "./cache-utils.ts";
 import type { Store } from "npm:@livestore/livestore";
-import {
-  type CellData,
-  type OutputData as SchemaOutputData,
-  schema,
-  tables,
-} from "@runt/schema";
+import { schema } from "@runt/schema";
 import {
   discoverAvailableAiModels,
+  ensureTextPlainFallback,
   executeAI,
-  NotebookContextData,
+  gatherNotebookContext,
 } from "@runt/ai";
 
 /**
@@ -341,7 +334,7 @@ export class PyodideRuntimeAgent {
 
     // When an AI cell, hand it off to `@runt/ai` to handle, providing it notebook context
     if (cell.cellType === "ai") {
-      const notebookContext = this.gatherNotebookContext(cell);
+      const notebookContext = gatherNotebookContext(this.store, cell);
 
       // Track AI execution for cancellation
       const aiAbortController = new AbortController();
@@ -580,7 +573,7 @@ export class PyodideRuntimeAgent {
       }
 
       if (hasMimeType) {
-        // Validate and ensure text/plain fallback
+        // Validate and ensure text/plain fallback for display
         const validated = validateMediaBundle(rawBundle);
         return ensureTextPlainFallback(validated);
       }
@@ -710,116 +703,5 @@ export class PyodideRuntimeAgent {
     }
 
     this.logger.info("Pyodide worker cleanup completed");
-  }
-
-  /**
-   * Gather context from previous cells for AI execution
-   */
-  public gatherNotebookContext(currentCell: CellData): NotebookContextData {
-    // Query all cells that come before the current cell AND are visible to AI
-    const allCells = this.store.query(
-      tables.cells.select().orderBy("position", "asc"),
-    );
-
-    const previousCells = allCells
-      .filter((cell: CellData) =>
-        cell.position < currentCell.position &&
-        cell.aiContextVisible !== false
-      )
-      .map((cell: CellData) => {
-        // Get outputs for each cell
-        const outputs = this.store.query(
-          tables.outputs
-            .select()
-            .where({ cellId: cell.id })
-            .orderBy("position", "asc"),
-        ) as SchemaOutputData[];
-
-        // Convert outputs to AI-friendly formats
-        const filteredOutputs = outputs.map((output: SchemaOutputData) => {
-          const outputData = output.data;
-
-          if (outputData && typeof outputData === "object") {
-            // For rich media outputs, convert to AI-friendly bundle
-            if (
-              outputData["text/plain"] || outputData["text/html"] ||
-              outputData["text/markdown"] || outputData["application/json"]
-            ) {
-              const aiBundle = toAIMediaBundle(outputData as MediaBundle);
-              return {
-                outputType: output.outputType,
-                data: aiBundle,
-              };
-            }
-
-            // With new schema, data is flattened - check output type and handle accordingly
-            if (output.outputType === "terminal") {
-              return {
-                outputType: output.outputType,
-                data: {
-                  text: output.data || "",
-                  name: output.streamName || "stdout",
-                },
-              };
-            }
-
-            // For error outputs, parse JSON data
-            if (output.outputType === "error") {
-              try {
-                const errorData = typeof output.data === "string"
-                  ? JSON.parse(output.data)
-                  : output.data;
-                return {
-                  outputType: output.outputType,
-                  data: {
-                    ename: errorData?.ename || "Error",
-                    evalue: errorData?.evalue || "Unknown error",
-                    traceback: errorData?.traceback || [],
-                  },
-                };
-              } catch {
-                return {
-                  outputType: output.outputType,
-                  data: {
-                    ename: "Error",
-                    evalue: String(output.data || "Unknown error"),
-                    traceback: [],
-                  },
-                };
-              }
-            }
-
-            // For multimedia outputs, use representations if available
-            if (output.representations) {
-              return {
-                outputType: output.outputType,
-                data: output.representations,
-              };
-            }
-          }
-
-          // Fallback to data field
-          return {
-            outputType: output.outputType,
-            data: typeof output.data === "string"
-              ? { "text/plain": output.data }
-              : (output.data || {}),
-          };
-        });
-
-        return {
-          id: cell.id,
-          cellType: cell.cellType,
-          source: cell.source || "",
-          position: cell.position,
-          outputs: filteredOutputs,
-        };
-      });
-
-    return {
-      previousCells,
-      totalCells: allCells.length,
-      currentCellPosition: currentCell.position,
-    };
   }
 }

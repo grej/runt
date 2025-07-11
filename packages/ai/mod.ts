@@ -9,12 +9,75 @@ import type {
 } from "@runt/lib";
 
 import { handleToolCallWithResult } from "./tool-registry.ts";
-import type { Store } from "@runt/schema";
+import type {
+  AiToolCallData,
+  AiToolResultData,
+  MediaContainer,
+  Store,
+} from "@runt/schema";
+import { AI_TOOL_CALL_MIME_TYPE, AI_TOOL_RESULT_MIME_TYPE } from "@runt/schema";
+import { createLogger } from "@runt/lib";
 
 import { OpenAIClient } from "./openai-client.ts";
 import { RuntOllamaClient } from "./ollama-client.ts";
 
+// Import and export AI-specific media utilities
+import {
+  type AIMediaBundle,
+  ensureTextPlainFallback,
+  extractStructuredData,
+  hasVisualContent,
+  type RichOutputData,
+  toAIContext,
+  toAIMediaBundle,
+} from "./media-utils.ts";
+
+// Re-export for external use
+export {
+  type AIMediaBundle,
+  ensureTextPlainFallback,
+  extractStructuredData,
+  hasVisualContent,
+  type RichOutputData,
+  toAIContext,
+  toAIMediaBundle,
+};
+
+// Export notebook context functions
+export { gatherNotebookContext } from "./notebook-context.ts";
+
+// Create logger for AI conversation debugging
+const logger = createLogger("ai-conversation");
+
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+
+// Extended message type for rich multimedia content
+export interface RichChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content:
+    | string
+    | Array<{
+      type: "text" | "image_url";
+      text?: string;
+      image_url?: {
+        url: string;
+        detail?: "low" | "high" | "auto";
+      };
+    }>;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+  tool_call_id?: string;
+  // Preserve original multimedia data for AI clients that can handle it
+  multimedia?: {
+    [mimeType: string]: unknown;
+  };
+}
 
 // Helper types for accessing tool call properties
 type ChatMessageWithToolCalls = ChatMessage & {
@@ -34,20 +97,9 @@ type ChatMessageWithToolCallId = ChatMessage & {
   tool_call_id: string;
 };
 
-interface ToolResultData {
-  tool_call_id: string;
-  result?: string;
-  status: string;
-}
-
-export interface ToolCallData {
-  tool_call_id: string;
-  tool_name: string;
-  arguments: Record<string, unknown>;
-  status: "success" | "error";
-  timestamp: string;
-  execution_time_ms?: number;
-}
+// Use schema types for tool data
+export type ToolResultData = AiToolResultData;
+export type ToolCallData = AiToolCallData;
 
 export interface NotebookContextData {
   previousCells: CellContextData[];
@@ -65,8 +117,9 @@ export interface CellContextData {
   position: number;
   outputs: Array<{
     outputType: string;
-    data: Record<string, unknown>;
+    data: unknown;
     metadata?: Record<string, unknown>;
+    representations?: Record<string, MediaContainer>;
   }>;
 }
 
@@ -80,50 +133,96 @@ export function buildConversationMessages(
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
+  logger.debug("Building conversation messages", {
+    totalCells: context.totalCells,
+    previousCellsCount: context.previousCells.length,
+    currentPosition: context.currentCellPosition,
+  });
+
   messages.push({
     role: "system" as const,
     content: systemPrompt,
   });
 
   // Process each cell in order, building sequential conversation
-  context.previousCells.forEach((cell) => {
+  context.previousCells.forEach((cell, cellIndex) => {
+    logger.debug(
+      `Processing cell ${cellIndex + 1}/${context.previousCells.length}`,
+      {
+        cellId: cell.id,
+        cellType: cell.cellType,
+        outputCount: cell.outputs?.length || 0,
+        position: cell.position,
+      },
+    );
     if (cell.cellType === "ai" && cell.outputs && cell.outputs.length > 0) {
       // Process AI cell outputs sequentially - each output becomes a message
       cell.outputs.forEach((output) => {
         const metadata = output.metadata as { anode?: { role?: string } };
         const role = metadata?.anode?.role;
 
-        if (role === "assistant" && output.data["text/markdown"]) {
-          // Assistant text response
+        // Handle markdown outputs from AI cells (streaming text responses)
+        if (
+          output.outputType === "markdown" &&
+          output.data &&
+          typeof output.data === "string" &&
+          metadata?.anode?.role === "assistant"
+        ) {
+          // Assistant markdown response
+          const markdownContent = String(output.data);
           messages.push({
             role: "assistant" as const,
-            content: String(output.data["text/markdown"]),
+            content: markdownContent,
+          });
+        } else if (
+          role === "assistant" && output.data &&
+          typeof output.data === "object" && "text/markdown" in output.data
+        ) {
+          // Assistant text response from display_data
+          const markdownContent = String(
+            (output.data as Record<string, unknown>)["text/markdown"],
+          );
+          messages.push({
+            role: "assistant" as const,
+            content: markdownContent,
           });
         } else if (role === "function_call") {
           // Tool call - create assistant message with tool_calls
-          const toolData = output
-            .data["application/vnd.anode.aitool+json"] as ToolCallData;
-          messages.push({
-            role: "assistant" as const,
-            content: "", // Empty content for pure tool call
-            tool_calls: [{
-              id: toolData.tool_call_id,
-              type: "function" as const,
-              function: {
-                name: toolData.tool_name,
-                arguments: JSON.stringify(toolData.arguments),
-              },
-            }],
-          });
+          const toolData = output.data && typeof output.data === "object" &&
+              AI_TOOL_CALL_MIME_TYPE in output.data
+            ? (output.data as Record<string, unknown>)[
+              AI_TOOL_CALL_MIME_TYPE
+            ] as AiToolCallData
+            : null;
+          if (toolData) {
+            messages.push({
+              role: "assistant" as const,
+              content: "", // Empty content for pure tool call
+              tool_calls: [{
+                id: toolData.tool_call_id,
+                type: "function" as const,
+                function: {
+                  name: toolData.tool_name,
+                  arguments: JSON.stringify(toolData.arguments),
+                },
+              }],
+            });
+          }
         } else if (role === "tool") {
           // Tool result
-          const resultData = output
-            .data["application/vnd.anode.aitool.result+json"] as ToolResultData;
-          messages.push({
-            role: "tool" as const,
-            content: resultData.result || "Success",
-            tool_call_id: resultData.tool_call_id,
-          });
+          const resultData = output.data && typeof output.data === "object" &&
+              AI_TOOL_RESULT_MIME_TYPE in output.data
+            ? (output.data as Record<string, unknown>)[
+              AI_TOOL_RESULT_MIME_TYPE
+            ] as AiToolResultData
+            : null;
+          if (resultData) {
+            messages.push({
+              role: "tool" as const,
+              content: resultData.result || "Success",
+              tool_call_id: resultData.tool_call_id,
+            });
+          }
         }
       });
     } else if (cell.cellType === "code" || cell.cellType === "sql") {
@@ -135,29 +234,123 @@ export function buildConversationMessages(
       if (cell.outputs && cell.outputs.length > 0) {
         cellMessage += `\n\nOutput:\n`;
         cell.outputs.forEach((output) => {
-          if (output.outputType === "terminal" && output.data.text) {
-            cellMessage += `\`\`\`\n${
-              stripAnsi(String(output.data.text))
-            }\`\`\`\n`;
-          } else if (
-            output.outputType === "error" && output.data.ename &&
-            output.data.evalue
-          ) {
-            cellMessage += `\`\`\`\nError: ${
-              stripAnsi(String(output.data.ename))
-            }: ${stripAnsi(String(output.data.evalue))}\n\`\`\`\n`;
+          if (output.outputType === "terminal" && output.data) {
+            // Handle both old format (data.text) and new format (data as string)
+            const terminalText = typeof output.data === "object" &&
+                output.data !== null && "text" in output.data
+              ? String((output.data as Record<string, unknown>).text)
+              : String(output.data);
+            cellMessage += `\`\`\`\n${stripAnsi(terminalText)}\`\`\`\n`;
           } else if (
             (output.outputType === "execute_result" ||
               output.outputType === "display_data") &&
-            output.data["text/plain"]
+            output.data && typeof output.data === "object"
           ) {
-            cellMessage += `\`\`\`\n${
-              stripAnsi(String(output.data["text/plain"]))
-            }\n\`\`\`\n`;
+            // Handle execute_result and display_data outputs
+            const outputData = output.data as Record<string, unknown>;
+            if (outputData["text/plain"]) {
+              cellMessage += `\`\`\`\n${
+                stripAnsi(String(outputData["text/plain"]))
+              }\n\`\`\`\n`;
+            }
+            if (outputData["text/markdown"]) {
+              cellMessage += `${outputData["text/markdown"]}\n`;
+            }
+          } else if (
+            output.outputType === "error" && output.data
+          ) {
+            try {
+              const errorData = typeof output.data === "string"
+                ? JSON.parse(output.data)
+                : output.data;
+              cellMessage += `\`\`\`\nError: ${
+                stripAnsi(String(errorData.ename || "Unknown"))
+              }: ${
+                stripAnsi(String(errorData.evalue || "Unknown error"))
+              }\n\`\`\`\n`;
+            } catch {
+              cellMessage += `\`\`\`\nError: ${
+                stripAnsi(String(output.data))
+              }\n\`\`\`\n`;
+            }
+          } else if (
+            output.outputType === "markdown" && output.data
+          ) {
+            cellMessage += `${output.data}\n`;
+          } else if (
+            (output.outputType === "multimedia_result" ||
+              output.outputType === "multimedia_display") &&
+            output.representations
+          ) {
+            // Handle MediaContainer representations (at top level, not in data)
+            const representations = output.representations;
+
+            logger.debug("Found multimedia representations", {
+              cellId: cell.id,
+              outputType: output.outputType,
+              mimeTypes: Object.keys(representations),
+              hasMarkdown: !!representations["text/markdown"],
+              hasPlain: !!representations["text/plain"],
+              markdownType: representations["text/markdown"]?.type,
+              plainType: representations["text/plain"]?.type,
+            });
+
+            // Preserve full multimedia data for AI providers that support it
+            const aiBundle = toAIMediaBundle(representations as RichOutputData);
+            const hasRichContent = Object.keys(aiBundle).length > 0;
+
+            if (hasRichContent) {
+              logger.debug(
+                "Adding multimedia content to conversation",
+                {
+                  cellId: cell.id,
+                  mimeTypes: Object.keys(aiBundle),
+                  hasMarkdown: !!aiBundle["text/markdown"],
+                  hasPlain: !!aiBundle["text/plain"],
+                  hasImages: Object.keys(aiBundle).some((type) =>
+                    type.startsWith("image/")
+                  ),
+                  hasJson: !!aiBundle["application/json"],
+                },
+              );
+
+              // Prioritize markdown for structured text, but preserve other formats
+              if (aiBundle["text/markdown"]) {
+                cellMessage += `${aiBundle["text/markdown"]}\n`;
+              } else if (aiBundle["text/plain"]) {
+                cellMessage += `${aiBundle["text/plain"]}\n`;
+              }
+
+              // Include structured data as formatted JSON
+              if (aiBundle["application/json"]) {
+                try {
+                  const jsonContent = JSON.stringify(
+                    aiBundle["application/json"],
+                    null,
+                    2,
+                  );
+                  cellMessage +=
+                    `\n**Structured Data:**\n\`\`\`json\n${jsonContent}\n\`\`\`\n`;
+                } catch {
+                  cellMessage += `\n**Structured Data:** ${
+                    String(aiBundle["application/json"])
+                  }\n`;
+                }
+              }
+
+              // Note presence of visual content for AI awareness
+              if (
+                Object.keys(aiBundle).some((type) => type.startsWith("image/"))
+              ) {
+                cellMessage += `\n**Visual Content:** ${
+                  Object.keys(aiBundle).filter((type) =>
+                    type.startsWith("image/")
+                  ).join(", ")
+                } (available for vision-capable models)\n`;
+              }
+            }
           }
-          if (output.data["text/markdown"]) {
-            cellMessage += `${output.data["text/markdown"]}\n`;
-          }
+
           // Future: Add image/multimodal support here
           // if (output.data["image/png"]) {
           //   cellMessage += `[Image output displayed]\n`;
@@ -182,6 +375,14 @@ export function buildConversationMessages(
   messages.push({
     role: "user" as const,
     content: userPrompt,
+  });
+
+  logger.debug("Conversation messages built successfully", {
+    totalMessages: messages.length,
+    systemMessages: messages.filter((m) => m.role === "system").length,
+    userMessages: messages.filter((m) => m.role === "user").length,
+    assistantMessages: messages.filter((m) => m.role === "assistant").length,
+    toolMessages: messages.filter((m) => m.role === "tool").length,
   });
 
   return messages;
@@ -304,7 +505,7 @@ export async function executeAI(
       if (isOllamaReady) {
         const openaiMessages = buildConversationMessages(
           notebookContext,
-          "This is a pyodide based notebook environment with assistant and user access to the same runtime. Users see and edit the same notebook as you. When you execute cells, the user sees the output as well",
+          "You are an AI assistant in a collaborative notebook environment. You can see all cell outputs (including terminal text, plots, tables, and errors) from code that has been executed. You can also execute code yourself using tool calls. Use the visible outputs and your execution capabilities to help analyze data and answer questions.",
           prompt,
         );
 
@@ -424,7 +625,7 @@ The system will automatically pull models if they're not available locally.`;
       // Use conversation-based approach for better AI interaction
       const conversationMessages = buildConversationMessages(
         notebookContext,
-        "This is a pyodide based notebook environment with assistant and user access to the same runtime. Users see and edit the same notebook as you. When you execute cells, the user sees the output as well",
+        "You are an AI assistant in a collaborative notebook environment. You can see all cell outputs (including terminal text, plots, tables, and errors) from code that has been executed. You can also execute code yourself using tool calls. Use the visible outputs and your execution capabilities to help analyze data and answer questions.",
         prompt,
       );
 
@@ -435,7 +636,7 @@ The system will automatically pull models if they're not available locally.`;
           index: idx,
           role: msg.role,
           contentLength: msg.content?.length || 0,
-          contentPreview: msg.content?.slice(0, 100) || "",
+          fullContent: msg.content || "",
           hasToolCalls: !!(msg as ChatMessageWithToolCalls).tool_calls,
           toolCallCount: (msg as ChatMessageWithToolCalls).tool_calls?.length ||
             0,
