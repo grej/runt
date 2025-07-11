@@ -1238,6 +1238,75 @@ export function isArtifactContainer(
   return container.type === "artifact";
 }
 
+// Alias for MediaRepresentation to match expected import
+export type MediaContainer = MediaRepresentation;
+
+// MIME type constants
+export const AI_TOOL_CALL_MIME_TYPE = "application/vnd.anode.ai-tool-call+json";
+export const AI_TOOL_RESULT_MIME_TYPE = "application/vnd.anode.ai-tool-result+json";
+export const TEXT_MIME_TYPES = ["text/plain", "text/markdown", "text/html"];
+export const APPLICATION_MIME_TYPES = ["application/json", "application/javascript"];
+export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/svg+xml", "image/gif"];
+export const JUPYTER_MIME_TYPES = [
+  "application/vnd.jupyter.widget-view+json",
+  "application/vnd.plotly.v1+json",
+  "text/latex"
+];
+
+// Type guards and helper functions
+export function isInlineContainer(value: unknown): value is MediaRepresentation & { type: "inline" } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    (value as any).type === "inline"
+  );
+}
+
+export function isArtifactContainer(value: unknown): value is MediaRepresentation & { type: "artifact" } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    (value as any).type === "artifact" &&
+    "artifactId" in value
+  );
+}
+
+// AI Tool data types and guards
+export interface AiToolCallData {
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  tool_call_id?: string;
+}
+
+export interface AiToolResultData {
+  tool_name: string;
+  result: unknown;
+  status?: "success" | "error";
+  tool_call_id?: string;
+  error?: string;
+}
+
+export function isAiToolCallData(value: unknown): value is AiToolCallData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tool_name" in value &&
+    typeof (value as any).tool_name === "string"
+  );
+}
+
+export function isAiToolResultData(value: unknown): value is AiToolResultData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tool_name" in value &&
+    "result" in value &&
+    typeof (value as any).tool_name === "string"
+  );
+}
+
 // Output data types for different output formats
 export interface RichOutputData {
   [mimeType: string]: MediaContainer;
