@@ -841,7 +841,10 @@ const materializers = State.SQLite.materializers(events, {
     tables.cells.update({ aiContextVisible }).where({ id }),
 
   "v1.PresenceSet": ({ userId, cellId }) =>
-    tables.presence.insert({ userId, cellId }).onConflict("userId", "replace"),
+    tables.presence.insert({ userId, cellId: cellId || null }).onConflict(
+      "userId",
+      "replace",
+    ),
 
   // Runtime lifecycle materializers
   "v1.RuntimeSessionStarted": ({
