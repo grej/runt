@@ -173,6 +173,14 @@ export const tables = {
     },
   }),
 
+  presence: State.SQLite.table({
+    name: "presence",
+    columns: {
+      userId: State.SQLite.text({ primaryKey: true }),
+      cellId: State.SQLite.text({ nullable: true }),
+    },
+  }),
+
   // Notebook metadata (key-value pairs per store)
   notebookMetadata: State.SQLite.table({
     name: "notebookMetadata",
@@ -456,6 +464,14 @@ export const events = {
         canExecuteAi: Schema.Boolean,
         availableAiModels: Schema.optional(Schema.Any),
       }),
+    }),
+  }),
+
+  presenceSet: Events.synced({
+    name: "v1.PresenceSet",
+    schema: Schema.Struct({
+      userId: Schema.String,
+      cellId: Schema.optional(Schema.String),
     }),
   }),
 
@@ -823,6 +839,9 @@ const materializers = State.SQLite.materializers(events, {
 
   "v1.CellAiContextVisibilityToggled": ({ id, aiContextVisible }) =>
     tables.cells.update({ aiContextVisible }).where({ id }),
+
+  "v1.PresenceSet": ({ userId, cellId }) =>
+    tables.presence.insert({ userId, cellId }).onConflict("userId", "replace"),
 
   // Runtime lifecycle materializers
   "v1.RuntimeSessionStarted": ({
