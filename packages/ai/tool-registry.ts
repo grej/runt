@@ -36,7 +36,7 @@ export const NOTEBOOK_TOOLS: NotebookTool[] = [
           enum: ["code", "markdown", "ai", "sql"],
           description: "The type of cell to create",
         },
-        content: {
+        source: {
           type: "string",
           description: "The content/source code for the cell",
         },
@@ -48,7 +48,7 @@ export const NOTEBOOK_TOOLS: NotebookTool[] = [
           default: "after_current",
         },
       },
-      required: ["cellType", "content"],
+      required: ["cellType", "source"],
     },
   },
   {
@@ -63,12 +63,12 @@ export const NOTEBOOK_TOOLS: NotebookTool[] = [
           description:
             "The actual cell ID from the context (e.g., 'cell-1234567890-abc'), not a position number",
         },
-        content: {
+        source: {
           type: "string",
           description: "The new content/source code for the cell",
         },
       },
-      required: ["cellId", "content"],
+      required: ["cellId", "source"],
     },
   },
   {
@@ -121,7 +121,7 @@ export function createCell(
   args: Record<string, unknown>,
 ) {
   const cellType = String(args.cellType || "code");
-  const content = String(args.content || "");
+  const content = String(args.source || args.content || "");  // Check source first, then content
   const position = String(args.position || "after_current");
 
   // Calculate position for new cell
@@ -194,7 +194,7 @@ export async function handleToolCallWithResult(
 
     case "modify_cell": {
       const cellId = String(args.cellId || "");
-      const content = String(args.content || "");
+      const content = String(args.source || args.content || "");
 
       if (!cellId) {
         logger.error("modify_cell: cellId is required");
